@@ -6,7 +6,9 @@ __pycache__/
 .pytest_cache/
 .mypy_cache/
 .venv/
+.venv*/
 venv/
+.env
 node_modules/
 dist/
 frontend/node_modules/

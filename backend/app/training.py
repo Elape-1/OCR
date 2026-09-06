@@ -9,6 +9,7 @@ from typing import Any, Iterable, List, Sequence
 
 import numpy as np
 import torch
+from PIL import Image
 
 
 def set_reproducible_seed(seed: int = 42) -> None:
@@ -50,6 +51,7 @@ class TokenExample:
     bboxes: list[list[int]]
     labels: list[str]
     document_id: str | int | None = None
+    image: str | None = None
 
 
 @dataclass(frozen=True)
@@ -90,7 +92,12 @@ def load_token_examples(file_path: str | Path) -> list[TokenExample]:
             document_id = record.get("document_id")
             if document_id is None:
                 document_id = record.get("image") or record.get("id")
-            examples.append(TokenExample(tokens=tokens, bboxes=bboxes, labels=labels, document_id=document_id))
+            image = record.get("image")
+            if image:
+                image_path = Path(str(image))
+                candidates = [image_path, path.parent / image_path]
+                image = str(next((candidate for candidate in candidates if candidate.exists()), image_path))
+            examples.append(TokenExample(tokens=tokens, bboxes=bboxes, labels=labels, document_id=document_id, image=image))
 
     if not examples:
         raise ValueError(f"No token-labeled examples found in {path}")
@@ -193,17 +200,24 @@ def _examples_to_dataset(examples: Sequence[TokenExample], label2id: dict[str, i
     _require_training_dependencies()
     rows = []
     for ex in examples:
-        rows.append({"tokens": ex.tokens, "bboxes": ex.bboxes, "labels": [label2id[l] for l in ex.labels]})
+        rows.append({"tokens": ex.tokens, "bboxes": ex.bboxes, "labels": [label2id[l] for l in ex.labels], "image": ex.image})
     return Dataset.from_list(rows)
 
 
 def _tokenize_and_align_labels(dataset: Any, processor: Any, max_length: int) -> Any:
     # dataset items: {tokens: list[str], bboxes: list[list[int]], labels: list[int]}
     def tokenize_batch(batch: dict[str, list[Any]]) -> dict[str, list[Any]]:
+        images = []
+        for image_path in batch.get("image", []):
+            if image_path:
+                with Image.open(image_path) as image:
+                    images.append(image.convert("RGB"))
+            else:
+                images.append(Image.new("RGB", (224, 224), "white"))
         tokenized_inputs = processor(
+            images=images,
             text=batch["tokens"],
             boxes=batch["bboxes"],
-            is_split_into_words=True,
             truncation=True,
             padding="max_length",
             max_length=max_length,
@@ -230,7 +244,7 @@ def _tokenize_and_align_labels(dataset: Any, processor: Any, max_length: int) ->
         # convert lists to plain Python lists for datasets
         return {k: [v[i] for i in range(len(batch["tokens"]))] for k, v in tokenized_inputs.items()}
 
-    tokenized = dataset.map(tokenize_batch, batched=True, remove_columns=["tokens", "bboxes", "labels"])
+    tokenized = dataset.map(tokenize_batch, batched=True, remove_columns=["tokens", "bboxes", "labels", "image"])
     tokenized.set_format(type="torch")
     return tokenized
 
