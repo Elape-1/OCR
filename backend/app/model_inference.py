@@ -35,7 +35,7 @@ class PredictionResult:
 class LayoutLMv3InferenceService:
     def __init__(self, model_source: str | None = None, ocr_only: bool | None = None) -> None:
         self.model_source = model_source or os.getenv("LAYOUTLMV3_MODEL_SOURCE", DEFAULT_LAYOUTLMV3_MODEL_SOURCE)
-        self.ocr_only = ocr_only if ocr_only is not None else os.getenv("LAYOUTLMV3_OCR_ONLY", "false").lower() in {"1", "true", "yes", "on"}
+        self.ocr_only = ocr_only if ocr_only is not None else os.getenv("LAYOUTLMV3_OCR_ONLY", "true").lower() in {"1", "true", "yes", "on"}
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.processor = None
         self.model = None

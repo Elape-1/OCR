@@ -714,9 +714,11 @@ def _rasterize_pdf(path: Path, document_id: str) -> List[Path]:
     try:
         for index, page in enumerate(pdf_document, start=1):
             output_path = asset_dir / f"page-{index:03d}.png"
-            matrix = fitz.Matrix(300 / 72, 300 / 72)
+            raster_dpi = max(72, int(os.getenv("OCR_RASTER_DPI", "300")))
+            matrix = fitz.Matrix(raster_dpi / 72, raster_dpi / 72)
             pixmap = page.get_pixmap(matrix=matrix, alpha=False)
             pixmap.save(str(output_path))
+            del pixmap
             page_paths.append(output_path)
     finally:
         pdf_document.close()

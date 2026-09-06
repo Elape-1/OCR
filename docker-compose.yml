@@ -32,6 +32,7 @@ services:
       UPLOAD_DIR: /app/uploads
       RAW_DATASET_PAGES_DIR: /app/datasets/raw-pages
       TESSERACT_CMD: /usr/bin/tesseract
+      OCR_RASTER_DPI: ${OCR_RASTER_DPI:-300}
     volumes:
       - ./uploads:/app/uploads
       - ./datasets:/app/datasets
@@ -62,6 +63,7 @@ services:
       UPLOAD_DIR: /app/uploads
       RAW_DATASET_PAGES_DIR: /app/datasets/raw-pages
       TESSERACT_CMD: /usr/bin/tesseract
+      OCR_RASTER_DPI: ${OCR_RASTER_DPI:-300}
     volumes:
       - ./uploads:/app/uploads
       - ./datasets:/app/datasets
