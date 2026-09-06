@@ -10,6 +10,19 @@ export const supabase = supabaseUrl && supabasePublishableKey
   ? createClient(supabaseUrl, supabasePublishableKey)
   : null
 
+const DEVICE_ID_STORAGE_KEY = 'ocr-device-id'
+
+function getDeviceId() {
+  let deviceId = window.localStorage.getItem(DEVICE_ID_STORAGE_KEY)
+  if (!deviceId) {
+    deviceId = typeof crypto?.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(36).slice(2)}`
+    window.localStorage.setItem(DEVICE_ID_STORAGE_KEY, deviceId)
+  }
+  return deviceId
+}
+
 export async function getAccessToken() {
   if (!supabase) return null
   const { data } = await supabase.auth.getSession()
@@ -22,6 +35,9 @@ export async function authenticatedFetch(input, init = {}) {
     throw new Error('Please sign in to continue')
   }
   const headers = new Headers(init.headers || {})
+  headers.set('X-Device-ID', getDeviceId())
   if (token) headers.set('Authorization', `Bearer ${token}`)
   return window.fetch(input, { ...init, headers })
 }
+
+export { getDeviceId }

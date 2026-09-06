@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { authRequired, authenticatedFetch, getAccessToken, supabase } from './supabaseClient'
+import { authRequired, authenticatedFetch, getAccessToken, getDeviceId, supabase } from './supabaseClient'
 
 const fetch = authenticatedFetch
 
@@ -239,7 +239,8 @@ function resolveApiAssetUrl(path, apiBaseUrl) {
   }
   const base = String(apiBaseUrl || '').replace(/\/+$/, '')
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
-  return `${base}${normalizedPath}`
+  const separator = normalizedPath.includes('?') ? '&' : '?'
+  return `${base}${normalizedPath}${separator}device_id=${encodeURIComponent(getDeviceId())}`
 }
 
 function LoadingSkeleton({ className = '' }) {
@@ -2167,6 +2168,7 @@ export default function App() {
         const formData = new FormData()
         formData.append('file', file)
         getAccessToken().then((token) => {
+          xhr.setRequestHeader('X-Device-ID', getDeviceId())
           if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`)
           xhr.send(formData)
         }).catch(reject)

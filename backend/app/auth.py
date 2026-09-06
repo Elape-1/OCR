@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Annotated, Any
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Query, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import ColumnElement
 
@@ -13,6 +14,7 @@ except ImportError:  # pragma: no cover - dependency is required in deployment
     jwt = None
 
 bearer_scheme = HTTPBearer(auto_error=False)
+DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 
 
 def auth_required() -> bool:
@@ -25,10 +27,17 @@ def owner_scope(column: Any, user_id: str) -> ColumnElement[bool]:
 
 def get_current_user_id(
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
+    device_id: Annotated[str | None, Header(alias="X-Device-ID")] = None,
+    query_device_id: Annotated[str | None, Query(alias="device_id")] = None,
 ) -> str:
     if credentials is None:
         if auth_required():
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required")
+        candidate = device_id or query_device_id
+        if candidate:
+            if not DEVICE_ID_PATTERN.fullmatch(candidate):
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid device id")
+            return f"device:{candidate}"
         return os.getenv("DEV_USER_ID", "local-development-user")
 
     if jwt is None:
