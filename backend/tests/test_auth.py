@@ -7,9 +7,9 @@ from app.main import app
 from app.models import Document
 
 
-def test_authentication_and_owner_scope_default_to_secure(monkeypatch) -> None:
+def test_authentication_and_owner_scope_default_to_no_login(monkeypatch) -> None:
     monkeypatch.delenv("AUTH_REQUIRED", raising=False)
-    assert auth_required() is True
+    assert auth_required() is False
     assert "IS NULL" not in str(owner_scope(Document.owner_id, "user-1"))
 
 

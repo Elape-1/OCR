@@ -16,7 +16,7 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 
 def auth_required() -> bool:
-    return os.getenv("AUTH_REQUIRED", "true").strip().lower() in {"1", "true", "yes", "on"}
+    return os.getenv("AUTH_REQUIRED", "false").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def owner_scope(column: Any, user_id: str) -> ColumnElement[bool]:
