@@ -1,0 +1,86 @@
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    init: true
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${OCR_DATABASE_URL:-sqlite:///./ocr_system.db}
+      AUTH_REQUIRED: ${AUTH_REQUIRED:-true}
+      DEV_USER_ID: ${DEV_USER_ID:-local-development-user}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-ocr-documents}
+      REDIS_URL: redis://redis:6379/0
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5}
+      CORS_ORIGINS: http://localhost:5173
+      UPLOAD_DIR: /app/uploads
+      RAW_DATASET_PAGES_DIR: /app/datasets/raw-pages
+      TESSERACT_CMD: /usr/bin/tesseract
+    volumes:
+      - ./uploads:/app/uploads
+      - ./datasets:/app/datasets
+      - ./ocr_system.db:/app/ocr_system.db
+    ports:
+      - "8000:8000"
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+  worker:
+    init: true
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${OCR_DATABASE_URL:-sqlite:///./ocr_system.db}
+      AUTH_REQUIRED: ${AUTH_REQUIRED:-true}
+      DEV_USER_ID: ${DEV_USER_ID:-local-development-user}
+      SUPABASE_URL: ${SUPABASE_URL}
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-ocr-documents}
+      REDIS_URL: redis://redis:6379/0
+      RUN_MIGRATIONS: ${RUN_MIGRATIONS:-true}
+      DB_CONNECT_TIMEOUT: ${DB_CONNECT_TIMEOUT:-5}
+      UPLOAD_DIR: /app/uploads
+      RAW_DATASET_PAGES_DIR: /app/datasets/raw-pages
+      TESSERACT_CMD: /usr/bin/tesseract
+    volumes:
+      - ./uploads:/app/uploads
+      - ./datasets:/app/datasets
+      - ./ocr_system.db:/app/ocr_system.db
+    command: celery -A app.tasks.celery_app worker --loglevel=info
+
+  frontend:
+    init: true
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+      VITE_AUTH_REQUIRED: ${AUTH_REQUIRED:-false}
+      VITE_SUPABASE_URL: ${SUPABASE_URL}
+      VITE_SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY}
+    ports:
+      - "5173:5173"
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0"
+
