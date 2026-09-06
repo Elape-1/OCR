@@ -1821,7 +1821,8 @@ export default function App() {
         timeoutId = window.setTimeout(pollStatus, 1800)
       } catch (error) {
         if (isCurrent()) {
-          setProcessingError(error.message)
+          setProcessingError(`Unable to check processing status. Retrying... (${error.message})`)
+          timeoutId = window.setTimeout(pollStatus, 3000)
         }
       }
     }
