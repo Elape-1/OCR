@@ -834,6 +834,16 @@ function UploadPagePreview({ preview, fileName }) {
         pages.forEach((page, index) => {
           page.style.display = index === 0 ? 'block' : 'none'
         })
+        const firstPage = pages[0]
+        if (!firstPage) return
+        await new Promise((resolve) => window.requestAnimationFrame(resolve))
+        const availableWidth = Math.max(docxRef.current.clientWidth - 16, 1)
+        const availableHeight = Math.max(docxRef.current.clientHeight - 16, 1)
+        const pageWidth = firstPage.offsetWidth
+        const pageHeight = firstPage.offsetHeight
+        const scale = Math.min(availableWidth / pageWidth, availableHeight / pageHeight, 1)
+        firstPage.style.transform = `scale(${scale})`
+        firstPage.style.transformOrigin = 'center center'
       } catch (error) {
         if (active) setPreviewError(error.message || 'Unable to render the first page.')
       }

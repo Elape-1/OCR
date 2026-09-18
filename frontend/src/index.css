@@ -184,19 +184,24 @@ select {
 }
 
 .document-preview-docx .docx-wrapper {
-  min-height: 100%;
+  display: flex !important;
+  height: 100% !important;
+  width: 100% !important;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
   padding: 0 !important;
   background: transparent !important;
 }
 
 .document-preview-docx section {
-  height: 100%;
+  height: auto !important;
   min-height: 0;
-  max-width: 100%;
+  max-width: none !important;
+  flex: 0 0 auto;
   margin: 0 auto !important;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
-  transform-origin: top center;
-  overflow: hidden;
+  overflow: visible;
 }
 
 .document-scan-line {
