@@ -803,12 +803,20 @@ function UploadPagePreview({ preview, fileName }) {
       try {
         const pdf = await pdfjsLib.getDocument(preview.url).promise
         const page = await pdf.getPage(1)
-        const containerWidth = Math.max(canvasRef.current.parentElement?.clientWidth || 480, 320)
+        const container = canvasRef.current.parentElement
+        const containerWidth = Math.max(container?.clientWidth || 480, 320)
+        const containerHeight = Math.max(container?.clientHeight || 208, 160)
         const baseViewport = page.getViewport({ scale: 1 })
-        const viewport = page.getViewport({ scale: containerWidth / baseViewport.width })
+        const scale = Math.min(
+          (containerWidth - 16) / baseViewport.width,
+          (containerHeight - 16) / baseViewport.height,
+        )
+        const viewport = page.getViewport({ scale })
         const canvas = canvasRef.current
         canvas.width = viewport.width
         canvas.height = viewport.height
+        canvas.style.width = `${viewport.width}px`
+        canvas.style.height = `${viewport.height}px`
         if (active) await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise
       } catch (error) {
         if (active) setPreviewError(error.message || 'Unable to render the first page.')

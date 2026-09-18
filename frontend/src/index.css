@@ -145,8 +145,7 @@ select {
 
 .document-preview-pdf {
   display: block;
-  max-height: 100%;
-  max-width: 100%;
+  flex: 0 0 auto;
   object-fit: contain;
 }
 
