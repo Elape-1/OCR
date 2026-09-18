@@ -786,6 +786,7 @@ function LandingPage({
 function UploadPagePreview({ preview, fileName }) {
   const docxRef = useRef(null)
   const canvasRef = useRef(null)
+  const pageRef = useRef(null)
   const [previewError, setPreviewError] = useState('')
   const extension = String(fileName || '').split('.').pop()?.toLowerCase()
   const mimeType = preview?.type || ''
@@ -803,9 +804,9 @@ function UploadPagePreview({ preview, fileName }) {
       try {
         const pdf = await pdfjsLib.getDocument(preview.url).promise
         const page = await pdf.getPage(1)
-        const container = canvasRef.current.parentElement
-        const containerWidth = Math.max(container?.clientWidth || 480, 320)
-        const containerHeight = Math.max(container?.clientHeight || 208, 160)
+        const container = pageRef.current
+        const containerWidth = Math.max(container?.clientWidth || 190, 160)
+        const containerHeight = Math.max(container?.clientHeight || 264, 220)
         const baseViewport = page.getViewport({ scale: 1 })
         const scale = Math.min(
           (containerWidth - 16) / baseViewport.width,
@@ -849,8 +850,8 @@ function UploadPagePreview({ preview, fileName }) {
   return (
     <div className="document-preview-shell">
       <div className="document-preview-page">
-        {preview?.url && isImage ? <img src={preview.url} alt="First page preview" className="h-full w-full object-contain" /> : null}
-        {preview?.url && isPdf ? <canvas ref={canvasRef} className="document-preview-pdf" aria-label="First page preview" /> : null}
+        {preview?.url && isImage ? <img src={preview.url} alt="First page preview" className="document-preview-image" /> : null}
+        {preview?.url && isPdf ? <div ref={pageRef} className="document-preview-page-inner"><canvas ref={canvasRef} className="document-preview-pdf" aria-label="First page preview" /></div> : null}
         {preview?.url && isDocx ? <div ref={docxRef} className="document-preview-docx" aria-label="First page preview" /> : null}
         {!preview?.url || (!isImage && !isPdf && !isDocx) || previewError ? (
           <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
