@@ -830,7 +830,7 @@ function UploadPagePreview({ preview, fileName }) {
         const response = await window.fetch(preview.url)
         const blob = await response.blob()
         await renderDocx(blob, docxRef.current, undefined, { inWrapper: true, breakPages: true })
-        const pages = docxRef.current.querySelectorAll('.docx-wrapper > section')
+        const pages = docxRef.current.querySelectorAll('.docx > section')
         pages.forEach((page, index) => {
           page.style.display = index === 0 ? 'block' : 'none'
         })
