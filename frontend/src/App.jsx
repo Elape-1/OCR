@@ -850,7 +850,11 @@ function UploadPagePreview({ preview, fileName }) {
   return (
     <div className="document-preview-shell">
       <div className="document-preview-page">
-        {preview?.url && isImage ? <img src={preview.url} alt="First page preview" className="document-preview-image" /> : null}
+        {preview?.url && isImage ? (
+          <div className="document-preview-page-inner">
+            <img src={preview.url} alt="First page preview" className="document-preview-image" />
+          </div>
+        ) : null}
         {preview?.url && isPdf ? <div ref={pageRef} className="document-preview-page-inner"><canvas ref={canvasRef} className="document-preview-pdf" aria-label="First page preview" /></div> : null}
         {preview?.url && isDocx ? <div ref={docxRef} className="document-preview-docx" aria-label="First page preview" /> : null}
         {!preview?.url || (!isImage && !isPdf && !isDocx) || previewError ? (
