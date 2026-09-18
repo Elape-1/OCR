@@ -124,3 +124,77 @@ select {
 .processing-ring {
   animation: pulseSoft 2.2s ease-in-out infinite;
 }
+
+.document-preview-shell {
+  position: relative;
+  height: 16rem;
+  overflow: hidden;
+  border-radius: 1rem;
+  background: #e2e8f0;
+}
+
+.document-preview-page {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  background: #ffffff;
+}
+
+.document-preview-pdf {
+  display: block;
+  height: 100%;
+  width: 100%;
+  object-fit: contain;
+}
+
+.document-preview-docx {
+  height: 100%;
+  overflow: hidden;
+  padding: 0.75rem;
+  background: #e2e8f0;
+}
+
+.document-preview-docx .docx-wrapper {
+  min-height: 100%;
+  padding: 0 !important;
+  background: transparent !important;
+}
+
+.document-preview-docx section {
+  min-height: 100%;
+  margin: 0 auto !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+  transform-origin: top center;
+}
+
+.document-scan-line {
+  position: absolute;
+  left: 0.75rem;
+  right: 0.75rem;
+  top: 0;
+  z-index: 2;
+  height: 0.18rem;
+  background: linear-gradient(90deg, transparent, #22d3ee 18%, #2563eb 50%, #22d3ee 82%, transparent);
+  box-shadow: 0 0 1rem rgba(37, 99, 235, 0.85);
+  animation: scanDocument 2.4s ease-in-out infinite;
+}
+
+.document-preview-label {
+  position: absolute;
+  bottom: 0.75rem;
+  left: 0.75rem;
+  z-index: 3;
+  border-radius: 9999px;
+  background: rgba(15, 23, 42, 0.78);
+  padding: 0.3rem 0.65rem;
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@keyframes scanDocument {
+  0%, 100% { transform: translateY(0); opacity: 0.55; }
+  50% { transform: translateY(15.5rem); opacity: 1; }
+}

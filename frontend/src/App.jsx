@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import * as pdfjsLib from 'pdfjs-dist'
+import pdfjsWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import { renderAsync as renderDocx } from 'docx-preview'
 import { authRequired, authenticatedFetch, getAccessToken, getDeviceId, supabase } from './supabaseClient'
 
 const fetch = authenticatedFetch
@@ -72,6 +75,8 @@ const PROCESSING_MESSAGES = [
   'Saving extracted data...',
   'Finalizing results...',
 ]
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
 function parseInitialRoute() {
   const url = new URL(window.location.href)
@@ -778,7 +783,84 @@ function LandingPage({
   )
 }
 
-function ProcessingPage({ activity, progress, etaLabel, previewUrl, documentData, processingError, onRetry, onCancel, onBackToLibrary }) {
+function UploadPagePreview({ preview, fileName }) {
+  const docxRef = useRef(null)
+  const canvasRef = useRef(null)
+  const [previewError, setPreviewError] = useState('')
+  const extension = String(fileName || '').split('.').pop()?.toLowerCase()
+  const mimeType = preview?.type || ''
+  const isImage = mimeType.startsWith('image/')
+  const isPdf = mimeType === 'application/pdf' || extension === 'pdf'
+  const isDocx = mimeType === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' || extension === 'docx'
+  const isDocument = isPdf || isDocx || extension === 'doc' || extension === 'docm'
+
+  useEffect(() => {
+    let active = true
+    setPreviewError('')
+
+    async function renderPreview() {
+      if (!preview?.url || !isPdf || !canvasRef.current) return
+      try {
+        const pdf = await pdfjsLib.getDocument(preview.url).promise
+        const page = await pdf.getPage(1)
+        const containerWidth = Math.max(canvasRef.current.parentElement?.clientWidth || 480, 320)
+        const baseViewport = page.getViewport({ scale: 1 })
+        const viewport = page.getViewport({ scale: containerWidth / baseViewport.width })
+        const canvas = canvasRef.current
+        canvas.width = viewport.width
+        canvas.height = viewport.height
+        if (active) await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise
+      } catch (error) {
+        if (active) setPreviewError(error.message || 'Unable to render the first page.')
+      }
+    }
+
+    async function renderWordPreview() {
+      if (!preview?.url || !isDocx || !docxRef.current) return
+      try {
+        const response = await window.fetch(preview.url)
+        const blob = await response.blob()
+        await renderDocx(blob, docxRef.current, undefined, { inWrapper: true, breakPages: true })
+        const pages = docxRef.current.querySelectorAll('.docx-wrapper > section')
+        pages.forEach((page, index) => {
+          page.style.display = index === 0 ? 'block' : 'none'
+        })
+      } catch (error) {
+        if (active) setPreviewError(error.message || 'Unable to render the first page.')
+      }
+    }
+
+    void renderPreview()
+    void renderWordPreview()
+    return () => {
+      active = false
+      if (docxRef.current) docxRef.current.replaceChildren()
+    }
+  }, [isDocx, isPdf, preview?.url])
+
+  return (
+    <div className="document-preview-shell">
+      <div className="document-preview-page">
+        {preview?.url && isImage ? <img src={preview.url} alt="First page preview" className="h-full w-full object-contain" /> : null}
+        {preview?.url && isPdf ? <canvas ref={canvasRef} className="document-preview-pdf" aria-label="First page preview" /> : null}
+        {preview?.url && isDocx ? <div ref={docxRef} className="document-preview-docx" aria-label="First page preview" /> : null}
+        {!preview?.url || (!isImage && !isPdf && !isDocx) || previewError ? (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center">
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-blue-700">
+              <svg viewBox="0 0 24 24" className="h-7 w-7" fill="none" stroke="currentColor" strokeWidth="1.6"><path d="M6 3.75h8l4 4v12.5H6z" /><path d="M14 3.75v4h4M8.5 12h7M8.5 15.5h5" /></svg>
+            </div>
+            <p className="text-sm font-semibold text-slate-700">{extension === 'doc' || extension === 'docm' ? 'Word document' : 'First page preview'}</p>
+            <p className="text-xs leading-5 text-slate-500">{previewError || 'The file is ready for OCR. A first-page image preview is unavailable for this format.'}</p>
+          </div>
+        ) : null}
+      </div>
+      <div className="document-scan-line" aria-hidden="true" />
+      <div className="document-preview-label">{isDocument ? 'Page 1' : 'Image preview'}</div>
+    </div>
+  )
+}
+
+function ProcessingPage({ activity, progress, etaLabel, preview, documentData, processingError, onRetry, onCancel, onBackToLibrary }) {
   return (
     <div className="flex min-h-[calc(100vh-82px)] items-center justify-center px-4 py-8 lg:px-8">
       <div className="w-full max-w-5xl rounded-[32px] border border-slate-200 bg-white px-6 py-10 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:px-10">
@@ -850,11 +932,7 @@ function ProcessingPage({ activity, progress, etaLabel, previewUrl, documentData
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Uploaded file</p>
               <div className="mt-4 rounded-[26px] border border-slate-200 bg-white p-4 shadow-sm">
-                {previewUrl ? (
-                  <img src={previewUrl} alt="Uploaded preview" className="h-64 w-full rounded-2xl object-contain bg-slate-50" />
-                ) : (
-                  <div className="flex h-64 items-center justify-center rounded-2xl bg-slate-50 text-slate-400">No preview available</div>
-                )}
+                <UploadPagePreview preview={preview} fileName={documentData?.name} />
               </div>
             </div>
 
@@ -1850,7 +1928,7 @@ export default function App() {
     }
 
     return () => {
-      URL.revokeObjectURL(uploadPreview)
+      URL.revokeObjectURL(uploadPreview.url)
     }
   }, [uploadPreview])
 
@@ -2129,7 +2207,7 @@ export default function App() {
     setProcessingError('')
     setViewerError('')
     setViewerBundle(null)
-    setUploadPreview(URL.createObjectURL(file))
+    setUploadPreview({ url: URL.createObjectURL(file), type: file.type })
     setUploadName(file.name)
     setProcessingProgress(12)
     setActivity('Uploading document...')
@@ -2557,7 +2635,7 @@ export default function App() {
             activity={activity}
             progress={processingProgress}
             etaLabel={processingEta}
-            previewUrl={uploadPreview}
+            preview={uploadPreview}
             documentData={processingDocument || documentData}
             processingError={processingError}
             onRetry={retryProcessing}
