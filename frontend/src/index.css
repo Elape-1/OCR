@@ -183,23 +183,25 @@ select {
   background: #e2e8f0;
 }
 
-.document-preview-docx .docx {
+.document-preview-docx .docx-wrapper {
   display: flex !important;
   height: 100% !important;
   width: 100% !important;
   align-items: center;
   justify-content: center;
   min-height: 0;
+  overflow: hidden !important;
   padding: 0 !important;
-  background: transparent !important;
+  background: #ffffff !important;
 }
 
-.document-preview-docx section {
+.document-preview-docx .docx-wrapper > section.docx {
   height: auto !important;
   min-height: 0;
   max-width: none !important;
   flex: 0 0 auto;
   margin: 0 auto !important;
+  background: #ffffff !important;
   box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
   overflow: visible;
 }
