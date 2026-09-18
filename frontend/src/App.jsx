@@ -866,12 +866,6 @@ function ProcessingPage({ activity, progress, etaLabel, preview, documentData, p
       <div className="w-full max-w-5xl rounded-[32px] border border-slate-200 bg-white px-6 py-10 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:px-10">
         <div className="grid gap-10 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
           <div className="space-y-8 text-center lg:text-left">
-            <div className="mx-auto flex h-24 w-24 items-center justify-center rounded-[28px] border border-slate-200 bg-blue-50 text-blue-700 shadow-sm lg:mx-0 processing-ring">
-              <svg viewBox="0 0 24 24" className="h-11 w-11 animate-spin" fill="none" stroke="currentColor" strokeWidth="1.6">
-                <path d="M21 12a9 9 0 1 1-4.43-7.75" />
-              </svg>
-            </div>
-
             <div className="space-y-4">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Processing</p>
               <h1 className="text-4xl font-semibold tracking-tight text-slate-900 sm:text-5xl">Your document is being prepared.</h1>
