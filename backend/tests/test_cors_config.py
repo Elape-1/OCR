@@ -21,6 +21,7 @@ def test_default_cors_is_restricted_without_explicit_dev_mode(monkeypatch) -> No
     assert reloaded.merged_local_origins
     assert "*" not in reloaded.merged_local_origins
     assert "http://localhost:5173" in reloaded.merged_local_origins
+    assert "https://ocr-elape.vercel.app" in reloaded.merged_local_origins
 
 
 def test_development_env_enables_permissive_cors_only_when_explicit(monkeypatch) -> None:
