@@ -931,15 +931,15 @@ function ProcessingPage({ activity, progress, etaLabel, preview, documentData, p
             </div>
           </div>
 
-          <div className="space-y-5 rounded-[30px] border border-slate-200 bg-slate-50 p-6">
+          <div className="mx-auto w-full max-w-sm space-y-4 rounded-[24px] border border-slate-200 bg-slate-50 p-4 lg:mx-0 lg:justify-self-end">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Uploaded file</p>
-              <div className="mt-4 rounded-[26px] border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="mt-3 flex justify-center rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
                 <UploadPagePreview preview={preview} fileName={documentData?.name} />
               </div>
             </div>
 
-            <div className="rounded-[26px] border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
               <p className="text-sm font-semibold text-slate-900">Current step</p>
               <p className="mt-2 text-sm leading-6 text-slate-500">{activity}</p>
             </div>
@@ -2288,24 +2288,26 @@ export default function App() {
 
   async function cancelProcessing() {
     processingAbortRef.current = true
+    const documentIdToCancel = activeDocumentId
     if (uploadXhrRef.current) {
       uploadXhrRef.current.abort()
       uploadXhrRef.current = null
     }
-    if (activeDocumentId) {
-      try {
-        await fetch(`${apiBaseUrl}/api/v1/documents/${activeDocumentId}/status?status=CANCELED`, { method: 'PATCH' })
-        await refreshDocuments()
-      } catch (error) {
-        setProcessingError(error.message || 'Failed to cancel document processing.')
-        return
-      }
-    }
+
     setPage('landing')
     setUploadError('Upload canceled.')
     setProcessingError('')
     setProcessingProgress(0)
     setActivity('Preparing upload...')
+
+    if (documentIdToCancel) {
+      try {
+        await fetch(`${apiBaseUrl}/api/v1/documents/${documentIdToCancel}/status?status=CANCELED`, { method: 'PATCH' })
+        await refreshDocuments()
+      } catch (error) {
+        setUploadError(error.message || 'Upload canceled, but the server status could not be updated.')
+      }
+    }
   }
 
   function backToLibrary() {

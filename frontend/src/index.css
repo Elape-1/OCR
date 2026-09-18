@@ -127,7 +127,7 @@ select {
 
 .document-preview-shell {
   position: relative;
-  width: min(100%, 14rem);
+  width: min(100%, 10rem);
   aspect-ratio: 0.72;
   overflow: hidden;
   border-radius: 1rem;
