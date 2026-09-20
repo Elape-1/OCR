@@ -802,7 +802,7 @@ function UploadPagePreview({ preview, fileName }) {
     async function renderPreview() {
       if (!preview?.url || !isPdf || !canvasRef.current) return
       try {
-        const pdf = await pdfjsLib.getDocument(preview.url).promise
+        const pdf = await pdfjsLib.getDocument({ url: preview.url }).promise
         const page = await pdf.getPage(1)
         const container = pageRef.current
         const containerWidth = Math.max(container?.clientWidth || 190, 160)
