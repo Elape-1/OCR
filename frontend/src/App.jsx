@@ -189,10 +189,15 @@ function buildTokenAttributeIndex(attributes, pages) {
     if (attributeKey == null) {
       continue
     }
-    const boxes = Array.isArray(attribute.bounding_boxes) ? attribute.bounding_boxes : []
     const tokenKeys = []
 
     for (const page of pages || []) {
+      const pageSpan = (attribute.page_spans || []).find((span) => Number(span.page_number) === Number(page.page_number))
+      const boxes = pageSpan
+        ? (Array.isArray(pageSpan.bounding_boxes) ? pageSpan.bounding_boxes : [])
+        : (Number(attribute.page_number) === Number(page.page_number) || !attribute.page_number
+          ? (Array.isArray(attribute.bounding_boxes) ? attribute.bounding_boxes : [])
+          : [])
       for (const line of page.lines || []) {
         for (const token of line.tokens || []) {
           const tokenKey = `${page.page_number}:${token.token_index}`
@@ -1457,8 +1462,9 @@ function ViewerPage({
                   <div className="mt-4">
                     <label className="block space-y-2">
                       <span className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Value</span>
-                      <input
+                      <textarea
                         value={attribute.draft_value}
+                        rows={attribute.draft_value?.includes('\n') ? 5 : 2}
                         onChange={(event) => {
                           if (isDraftReview) {
                             updateReviewAttribute(attributeKey, 'draft_value', event.target.value)
@@ -1467,7 +1473,7 @@ function ViewerPage({
                           }
                         }}
                         readOnly={!isEditing && !isDraftReview}
-                        className={`w-full rounded-2xl border px-4 py-3 text-sm text-slate-900 outline-none transition ${isEditing || isDraftReview ? 'border-blue-300 bg-white' : 'border-slate-200 bg-white/80'}`}
+                        className={`w-full resize-y rounded-2xl border px-4 py-3 text-sm text-slate-900 outline-none transition ${isEditing || isDraftReview ? 'border-blue-300 bg-white' : 'border-slate-200 bg-white/80'}`}
                       />
                     </label>
                   </div>
@@ -2468,6 +2474,7 @@ export default function App() {
           page_number: attribute.page_number || 1,
           page_id: attribute.page_id,
           bounding_boxes: attribute.bounding_boxes || [],
+          page_spans: attribute.page_spans || [],
           confidence_score: attribute.confidence_score || 0,
           validation_status: attribute.draft_validation_status || attribute.validation_status || 'PENDING',
         })),
@@ -2499,6 +2506,7 @@ export default function App() {
             extracted_value: j.attribute.extracted_value,
             original_prediction: j.attribute.extracted_value,
             bounding_boxes: j.attribute.bounding_boxes || [],
+            page_spans: j.attribute.page_spans || [],
             confidence_score: j.attribute.confidence_score || 0,
             validation_status: j.attribute.validation_status || 'PENDING',
             source: j.attribute.source || 'manual',

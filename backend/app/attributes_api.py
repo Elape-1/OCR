@@ -45,6 +45,7 @@ class SelectedAttributeItem(BaseModel):
     page_number: int = Field(1, ge=1)
     page_id: int | None = None
     bounding_boxes: list[list[float | int]] = Field(default_factory=list)
+    page_spans: list[dict[str, Any]] = Field(default_factory=list)
     confidence_score: float = 0.0
     validation_status: str = "PENDING"
 
@@ -85,6 +86,8 @@ def _load_export_rows(document_id: int, db: Session) -> tuple[Document, list[dic
                 "confidence_score": attribute.confidence_score,
                 "validation_status": attribute.validation_status,
                 "bounding_boxes": attribute.bounding_boxes,
+                "page_spans": attribute.page_spans,
+                "page_spans": attribute.page_spans,
             }
         )
 
@@ -105,12 +108,14 @@ def _rows_to_csv(rows: list[dict[str, Any]]) -> str:
         "confidence_score",
         "validation_status",
         "bounding_boxes",
+        "page_spans",
     ]
     writer = csv.DictWriter(buffer, fieldnames=fieldnames)
     writer.writeheader()
     for row in rows:
         csv_row = dict(row)
         csv_row["bounding_boxes"] = json.dumps(row["bounding_boxes"], ensure_ascii=False)
+        csv_row["page_spans"] = json.dumps(row["page_spans"], ensure_ascii=False)
         writer.writerow(csv_row)
     return buffer.getvalue()
 
@@ -206,6 +211,7 @@ def save_selected_attributes(document_id: int, payload: SaveSelectedAttributesRe
                 entity_type_label=item.entity_type_label.strip(),
                 extracted_value=item.extracted_value.strip(),
                 bounding_boxes=item.bounding_boxes or (staged_row.get("bounding_boxes") if staged_row else []),
+                page_spans=item.page_spans or (staged_row.get("page_spans") if staged_row else []),
                 confidence_score=float(item.confidence_score if item.source == "manual" else (staged_row.get("confidence_score", item.confidence_score) if staged_row else item.confidence_score)),
                 validation_status=validation_status_value,
                 source=item.source,
@@ -260,6 +266,7 @@ def get_attribute_detail(attribute_id: int, db: Session = Depends(get_db), user_
             "confidence_score": attribute.confidence_score,
             "validation_status": attribute.validation_status,
             "bounding_boxes": attribute.bounding_boxes,
+            "page_spans": attribute.page_spans,
         }
     }
 

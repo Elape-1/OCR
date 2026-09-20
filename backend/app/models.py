@@ -77,6 +77,7 @@ class Attribute(Base):
     entity_type_label: Mapped[str] = mapped_column(String(128), nullable=False)
     extracted_value: Mapped[str] = mapped_column(Text, nullable=False)
     bounding_boxes: Mapped[List[Dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
+    page_spans: Mapped[List[Dict[str, Any]]] = mapped_column(JSON, nullable=False, default=list)
     confidence_score: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     validation_status: Mapped[str] = mapped_column(String(32), nullable=False, default="PENDING")
     source: Mapped[str] = mapped_column(String(32), nullable=False, default="model")

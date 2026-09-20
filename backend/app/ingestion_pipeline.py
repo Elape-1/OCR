@@ -257,6 +257,7 @@ def get_document_attributes(document_id: int, db: Session = Depends(get_db), use
                     "extracted_value": attribute.extracted_value,
                     "original_prediction": attribute.extracted_value,
                     "bounding_boxes": attribute.bounding_boxes,
+                    "page_spans": attribute.page_spans,
                     "confidence_score": attribute.confidence_score,
                     "validation_status": attribute.validation_status,
                     "source": attribute.source,
@@ -276,6 +277,7 @@ def get_document_attributes(document_id: int, db: Session = Depends(get_db), use
             "extracted_value": item.get("extracted_value", ""),
             "original_prediction": item.get("original_prediction", item.get("extracted_value", "")),
             "bounding_boxes": item.get("bounding_boxes", []),
+            "page_spans": item.get("page_spans", []),
             "confidence_score": item.get("confidence_score", 0.0),
             "validation_status": item.get("validation_status", "PENDING"),
             "source": item.get("source", "model"),
@@ -592,6 +594,12 @@ def process_document_job(document_id: int, source_key: str, original_name: str, 
                         "extracted_value": payload["extracted_value"],
                         "original_prediction": payload["extracted_value"],
                         "bounding_boxes": payload["bounding_boxes"],
+                        "page_spans": [{
+                            "page_id": page.id,
+                            "page_number": index,
+                            "text": payload["extracted_value"],
+                            "bounding_boxes": payload["bounding_boxes"],
+                        }],
                         "confidence_score": payload["confidence_score"],
                         "validation_status": payload["validation_status"],
                         "source": "model",
@@ -599,6 +607,7 @@ def process_document_job(document_id: int, source_key: str, original_name: str, 
                     }
                 )
 
+        staged_attributes = _merge_staged_attributes(staged_attributes)
         db.expire(document)
         db.refresh(document)
         if document.status == "CANCELED":
@@ -974,6 +983,16 @@ def _build_attribute_payloads_for_page(
             document_type=document_type,
         )
         token_predictions = inference_result.get("tokens", [])
+        for index, prediction in enumerate(token_predictions):
+            if index >= len(tokens):
+                break
+            prediction.update(
+                {
+                    "block_num": tokens[index].get("block_num", 0),
+                    "paragraph_num": tokens[index].get("paragraph_num", 0),
+                    "line_num": tokens[index].get("line_num", 0),
+                }
+            )
     except Exception as exc:
         logger.warning("LayoutLMv3 inference failed for %s; using OCR fallback: %s", image_path, exc)
         token_predictions = [
@@ -982,6 +1001,9 @@ def _build_attribute_payloads_for_page(
                 "label": "OCR",
                 "confidence": max(0.0, min(1.0, float(item["confidence"]) / 100.0)),
                 "bbox": item["bbox"],
+                "block_num": item.get("block_num", 0),
+                "paragraph_num": item.get("paragraph_num", 0),
+                "line_num": item.get("line_num", 0),
             }
             for item in tokens
         ]
@@ -993,3 +1015,27 @@ def _build_attribute_payloads_for_page(
         document_type=document_type,
         threshold=0.75,
     )
+
+
+def _merge_staged_attributes(attributes: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Merge semantically labeled continuations across adjacent pages."""
+    merged: list[dict[str, Any]] = []
+    for attribute in attributes:
+        label = str(attribute.get("entity_type_label", "")).strip()
+        previous = merged[-1] if merged else None
+        if (
+            previous
+            and label
+            and label.upper() != "OCR"
+            and label == previous.get("entity_type_label")
+            and int(attribute.get("page_number", 0) or 0) == int(previous.get("page_number", 0) or 0) + 1
+        ):
+            previous["extracted_value"] = f'{previous["extracted_value"].rstrip()}\n\n{attribute["extracted_value"].lstrip()}'
+            previous["original_prediction"] = previous["extracted_value"]
+            previous["bounding_boxes"] = list(previous.get("bounding_boxes") or []) + list(attribute.get("bounding_boxes") or [])
+            previous["page_spans"] = list(previous.get("page_spans") or []) + list(attribute.get("page_spans") or [])
+            previous["confidence_score"] = min(float(previous.get("confidence_score", 0.0)), float(attribute.get("confidence_score", 0.0)))
+            previous["validation_status"] = "APPROVED" if float(previous["confidence_score"]) >= 0.75 else "HITL"
+            continue
+        merged.append(attribute)
+    return merged

@@ -85,3 +85,31 @@ def test_cluster_entity_tokens_keeps_close_same_label_fields_separate_on_same_li
     assert len(clusters) == 2
     assert [cluster.extracted_value for cluster in clusters] == ["Alpha", "Beta"]
     assert all(len(cluster.bounding_boxes) == 1 for cluster in clusters)
+
+
+def test_cluster_entity_tokens_preserves_paragraph_boundaries() -> None:
+    clusters = cluster_entity_tokens(
+        [
+            {
+                "token": "First",
+                "label": "long_text",
+                "confidence": 0.96,
+                "bbox": [10, 10, 40, 20],
+                "block_num": 1,
+                "paragraph_num": 1,
+                "line_num": 1,
+            },
+            {
+                "token": "paragraph",
+                "label": "long_text",
+                "confidence": 0.96,
+                "bbox": [10, 30, 70, 40],
+                "block_num": 1,
+                "paragraph_num": 2,
+                "line_num": 1,
+            },
+        ]
+    )
+
+    assert len(clusters) == 1
+    assert clusters[0].extracted_value == "First\n\nparagraph"

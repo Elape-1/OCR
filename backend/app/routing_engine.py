@@ -85,7 +85,7 @@ def _should_merge_spatially(current_cluster: Dict[str, Any], candidate: Dict[str
     if same_line and same_block and same_paragraph:
         return horizontal_gap <= max(current_metrics["width"], candidate_metrics["width"]) * SAME_LINE_HORIZONTAL_GAP_MULTIPLIER
 
-    if same_block and same_paragraph and vertical_gap >= 0:
+    if same_block and vertical_gap >= 0:
         return vertical_gap <= max(current_metrics["height"], candidate_metrics["height"]) * SAME_BLOCK_VERTICAL_GAP_MULTIPLIER and abs(
             candidate_metrics["left"] - current_metrics["left"]
         ) <= max(current_metrics["width"], candidate_metrics["width"]) * SAME_BLOCK_LEFT_ALIGNMENT_MULTIPLIER
@@ -129,6 +129,8 @@ def cluster_entity_tokens(token_predictions: Sequence[Dict[str, Any]], threshold
                     "tokens": [prediction["token"]],
                     "boxes": [prediction["bbox"]],
                     "confidences": [prediction["confidence"]],
+                    "paragraphs": [prediction["paragraph_num"]],
+                    "lines": [prediction["line_num"]],
                     "sort_key": prediction["sort_key"],
                     "metrics": prediction["metrics"],
                     "block_num": prediction["block_num"],
@@ -141,6 +143,8 @@ def cluster_entity_tokens(token_predictions: Sequence[Dict[str, Any]], threshold
                 current["tokens"].append(prediction["token"])
                 current["boxes"].append(prediction["bbox"])
                 current["confidences"].append(prediction["confidence"])
+                current["paragraphs"].append(prediction["paragraph_num"])
+                current["lines"].append(prediction["line_num"])
                 current["metrics"] = prediction["metrics"]
                 current["sort_key"] = min(current["sort_key"], prediction["sort_key"])
             else:
@@ -150,6 +154,8 @@ def cluster_entity_tokens(token_predictions: Sequence[Dict[str, Any]], threshold
                     "tokens": [prediction["token"]],
                     "boxes": [prediction["bbox"]],
                     "confidences": [prediction["confidence"]],
+                    "paragraphs": [prediction["paragraph_num"]],
+                    "lines": [prediction["line_num"]],
                     "sort_key": prediction["sort_key"],
                     "metrics": prediction["metrics"],
                     "block_num": prediction["block_num"],
@@ -166,10 +172,26 @@ def cluster_entity_tokens(token_predictions: Sequence[Dict[str, Any]], threshold
     for cluster in clusters:
         mean_confidence = sum(cluster["confidences"]) / max(len(cluster["confidences"]), 1)
         validation_status = "APPROVED" if mean_confidence >= threshold else "HITL"
+        value_parts: list[str] = []
+        previous_paragraph: int | None = None
+        previous_line: int | None = None
+        for index, token in enumerate(cluster["tokens"]):
+            paragraph_num = cluster["paragraphs"][index]
+            line_num = cluster["lines"][index]
+            if index:
+                if paragraph_num != previous_paragraph:
+                    value_parts.append("\n\n")
+                elif line_num != previous_line:
+                    value_parts.append("\n")
+                else:
+                    value_parts.append(" ")
+            value_parts.append(token)
+            previous_paragraph = paragraph_num
+            previous_line = line_num
         routed.append(
             RoutedAttribute(
                 entity_type_label=str(cluster["label"]),
-                extracted_value=" ".join(cluster["tokens"]).strip(),
+                extracted_value="".join(value_parts).strip(),
                 bounding_boxes=[list(box) for box in cluster["boxes"]],
                 confidence_score=mean_confidence,
                 validation_status=validation_status,
