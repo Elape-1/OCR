@@ -96,7 +96,7 @@ DOCX files are currently rasterized with a direct text-to-PNG fallback in the in
 
 Documents are classified before LayoutLMv3 inference so the active attribute schema can be selected by type instead of applying one generic label set to every document. Long pages are processed with overlapping inference chunks so tokens are not silently dropped, and same-label spans are merged by spatial reading order instead of strict token adjacency.
 
-`microsoft/layoutlmv3-base` is a pretrained LayoutLMv3 encoder, not an attribute-extraction checkpoint. Keep `LAYOUTLMV3_OCR_ONLY=true` when using that base model. For attribute extraction, set `LAYOUTLMV3_MODEL_SOURCE` to a checkpoint produced by the token-classification training workflow and set `LAYOUTLMV3_OCR_ONLY=false`.
+With `LAYOUTLMV3_OCR_ONLY=false`, inference can initialize `LayoutLMv3ForTokenClassification` from the public `microsoft/layoutlmv3-base` weights and size its token-classification head to the active document schema. The encoder weights are pretrained, but this newly initialized head is not trained for attribute extraction; fine-tune it with the token-classification training workflow and set `LAYOUTLMV3_MODEL_SOURCE` to the resulting checkpoint for useful predictions. OCR-only mode remains enabled by default.
 
 When the same token appears in two adjacent overlap chunks, the stitched result keeps the higher-confidence prediction and uses the first-seen chunk only as the tie-breaker. No averaging or voting is applied.
 

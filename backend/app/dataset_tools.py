@@ -5,7 +5,7 @@ import json
 import re
 import sys
 from pathlib import Path, PurePosixPath
-from typing import Any, Iterable
+from typing import Any, Iterable, Sequence, cast
 from xml.etree import ElementTree as ET
 
 from PIL import Image
@@ -33,25 +33,50 @@ def _record_key(record: dict[str, Any], fallback: str) -> str:
     return str(record.get("id") or fallback)
 
 
+def _as_json_dict_list(payload: Any, source: str) -> list[dict[str, Any]]:
+    values: list[Any] = cast(list[Any], payload if isinstance(payload, list) else [payload])
+    normalized: list[dict[str, Any]] = []
+    for value in values:
+        if not isinstance(value, dict):
+            raise ValueError(f"{source} must contain JSON objects")
+        normalized.append(cast(dict[str, Any], value))
+    return normalized
+
+
+def _as_string_list(value: Any, source: str, field_name: str) -> list[str]:
+    if not isinstance(value, list):
+        raise ValueError(f"{source} requires {field_name} to be a list")
+    items: list[Any] = cast(list[Any], value)
+    return [str(item) for item in items]
+
+
+def _as_bbox_list(value: Any, source: str, field_name: str) -> list[list[int]]:
+    if not isinstance(value, list):
+        raise ValueError(f"{source} requires {field_name} to be a list")
+    boxes: list[Any] = cast(list[Any], value)
+    result: list[list[int]] = []
+    for box in boxes:
+        sequence = cast(Sequence[Any], box)
+        if len(sequence) != 4:
+            raise ValueError(f"{source} has malformed bbox entries in {field_name}")
+        result.append([int(round(float(item))) for item in sequence])
+    return result
+
+
 def _load_json_records(folder: str | Path) -> list[dict[str, Any]]:
     root = Path(folder)
     if root.is_file():
         if root.suffix.lower() == ".jsonl":
             return _load_jsonl(root)
         payload = json.loads(root.read_text(encoding="utf-8"))
-        values = payload if isinstance(payload, list) else [payload]
-        return [value for value in values if isinstance(value, dict)]
+        return _as_json_dict_list(payload, str(root))
     if not root.is_dir():
         raise FileNotFoundError(f"Annotation folder or JSON file not found: {root}")
 
     records: list[dict[str, Any]] = []
     for path in sorted(root.rglob("*.json")):
         payload = json.loads(path.read_text(encoding="utf-8"))
-        values = payload if isinstance(payload, list) else [payload]
-        for value in values:
-            if not isinstance(value, dict):
-                raise ValueError(f"Annotation record must be an object: {path}")
-            records.append(value)
+        records.extend(_as_json_dict_list(payload, str(path)))
     if not records:
         raise ValueError(f"No JSON annotation files found in {root}")
     return records
@@ -63,12 +88,12 @@ def _validate_token_record(record: dict[str, Any], source: str) -> dict[str, Any
     labels = record.get("labels")
     if not isinstance(tokens, list) or not isinstance(boxes, list) or not isinstance(labels, list):
         raise ValueError(f"{source} requires tokens, bboxes, and labels arrays")
-    if not len(tokens) == len(boxes) == len(labels):
+    if not len(cast(list[Any], tokens)) == len(cast(list[Any], boxes)) == len(cast(list[Any], labels)):
         raise ValueError(f"{source} has mismatched token, bbox, and label counts")
-    normalized = dict(record)
-    normalized["tokens"] = [str(token) for token in tokens]
-    normalized["bboxes"] = [[int(round(float(value))) for value in box] for box in boxes]
-    normalized["labels"] = [str(label) for label in labels]
+    normalized: dict[str, Any] = dict(record)
+    normalized["tokens"] = _as_string_list(tokens, source, "tokens")
+    normalized["bboxes"] = _as_bbox_list(boxes, source, "bboxes")
+    normalized["labels"] = _as_string_list(labels, source, "labels")
     return normalized
 
 
@@ -217,7 +242,7 @@ def _load_jsonl(path: str | Path) -> list[dict[str, Any]]:
                 value = json.loads(line)
                 if not isinstance(value, dict):
                     raise ValueError(f"Prediction line {line_number} must be an object")
-                records.append(value)
+                records.append(cast(dict[str, Any], value))
     return records
 
 
@@ -235,7 +260,7 @@ def convert_cvat_xml(xml_path: str | Path, image_root: str | Path, output: str |
             raise FileNotFoundError(f"CVAT image is missing: {image_name}")
         with Image.open(image_path) as image:
             width, height = image.size
-        boxes = []
+        boxes: list[tuple[str, list[int]]] = []
         for box_node in image_node.findall("box"):
             box = [
                 int(round(float(box_node.attrib[key])))
@@ -260,7 +285,7 @@ def convert_cvat_xml(xml_path: str | Path, image_root: str | Path, output: str |
                 iou = _intersection_over_union(absolute, box)
                 if iou > best_iou:
                     best_label, best_iou = label, iou
-            tokens.append(token["token"])
+            tokens.append(str(token["token"]))
             bboxes.append(normalized)
             labels.append(best_label if best_iou >= 0.1 else "O")
         records.append({

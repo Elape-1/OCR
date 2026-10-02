@@ -85,6 +85,21 @@ DOCUMENT_SCHEMAS: dict[str, DocumentSchema] = {
             "signature": "signature",
         },
     ),
+    "letter": DocumentSchema(
+        document_type="letter",
+        display_name="Letter",
+        keywords=("dear", "greetings", "subject", "sincerely", "respectfully", "request for"),
+        expected_fields=("date", "recipient", "subject", "sender", "body"),
+        label_aliases={
+            "to": "recipient",
+            "recipient": "recipient",
+            "subject": "subject",
+            "from": "sender",
+            "sender": "sender",
+            "date": "date",
+            "body": "body",
+        },
+    ),
 }
 
 DEFAULT_DOCUMENT_SCHEMA = DocumentSchema(
@@ -115,16 +130,6 @@ def classify_document_type(
         for keyword in schema.keywords:
             if keyword in haystack:
                 score += 2 if " " in keyword else 1
-        if layout_hints:
-            token_count = int(layout_hints.get("token_count", 0) or 0)
-            line_count = int(layout_hints.get("line_count", 0) or 0)
-            page_count = int(layout_hints.get("page_count", 0) or 0)
-            if document_type == "invoice" and token_count > 10:
-                score += 1
-            if document_type == "receipt" and page_count <= 2:
-                score += 1
-            if document_type == "transcript" and line_count > 10:
-                score += 1
         scores[document_type] = score
 
     if not scores:

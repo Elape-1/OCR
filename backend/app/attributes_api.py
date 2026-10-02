@@ -121,7 +121,7 @@ def _rows_to_csv(rows: list[dict[str, Any]]) -> str:
 
 
 @router.post("/attributes/correct")
-def correct_attributes(payload: CorrectionRequest, db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
+def correct_attributes(payload: CorrectionRequest, user_id: CurrentUserId, db: Session = Depends(get_db)) -> dict[str, Any]:
     applied_corrections: List[int] = []
     logger.info(
         "Received %s attribute correction(s) for document %s",
@@ -172,14 +172,14 @@ def correct_attributes(payload: CorrectionRequest, db: Session = Depends(get_db)
 
 
 @router.post("/documents/{document_id}/attributes/save-selected")
-def save_selected_attributes(document_id: int, payload: SaveSelectedAttributesRequest, db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
+def save_selected_attributes(document_id: int, payload: SaveSelectedAttributesRequest, user_id: CurrentUserId, db: Session = Depends(get_db)) -> dict[str, Any]:
     if int(payload.document_id) != document_id:
         raise HTTPException(status_code=400, detail="Payload document_id does not match URL")
     document = db.query(Document).filter(Document.id == document_id, owner_scope(Document.owner_id, user_id)).first()
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    staged_rows = [row for row in (document.extracted_attributes or []) if isinstance(row, dict)]
+    staged_rows = document.extracted_attributes or []
     staged_lookup = {str(row.get("temp_id")): row for row in staged_rows if row.get("temp_id")}
     saved_attribute_ids: list[int] = []
     selected_temp_ids: set[str] = {item.temp_id for item in payload.attributes}
@@ -193,6 +193,8 @@ def save_selected_attributes(document_id: int, payload: SaveSelectedAttributesRe
             page_id = item.page_id or (staged_row.get("page_id") if staged_row else None)
             page_number = item.page_number or (staged_row.get("page_number") if staged_row else 1)
             if page_id is None:
+                if not isinstance(page_number, int):
+                    raise HTTPException(status_code=400, detail=f"Invalid page number for attribute {item.temp_id}")
                 page = pages_by_number.get(page_number)
                 if page is None:
                     raise HTTPException(status_code=400, detail=f"Page {page_number} not found for attribute {item.temp_id}")
@@ -241,7 +243,7 @@ def save_selected_attributes(document_id: int, payload: SaveSelectedAttributesRe
 
 
 @router.get("/attributes/{attribute_id}")
-def get_attribute_detail(attribute_id: int, db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
+def get_attribute_detail(attribute_id: int, user_id: CurrentUserId, db: Session = Depends(get_db)) -> dict[str, Any]:
     statement = (
         select(Attribute, Document, Page)
         .join(Document, Attribute.document_id == Document.id)
@@ -272,7 +274,7 @@ def get_attribute_detail(attribute_id: int, db: Session = Depends(get_db), user_
 
 
 @router.delete("/attributes/{attribute_id}")
-def delete_attribute(attribute_id: int, db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
+def delete_attribute(attribute_id: int, user_id: CurrentUserId, db: Session = Depends(get_db)) -> dict[str, Any]:
     attribute = db.query(Attribute).join(Document).filter(Attribute.id == attribute_id, owner_scope(Document.owner_id, user_id)).first()
     if attribute is None:
         raise HTTPException(status_code=404, detail="Attribute not found")
@@ -284,7 +286,7 @@ def delete_attribute(attribute_id: int, db: Session = Depends(get_db), user_id: 
 
 
 @router.get("/attributes/export/{document_id}/json")
-def export_validated_attributes_json(document_id: int, db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
+def export_validated_attributes_json(document_id: int, user_id: CurrentUserId, db: Session = Depends(get_db)) -> dict[str, Any]:
     document, rows = _load_export_rows(document_id, db)
     if auth_required() and document.owner_id != user_id:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -298,7 +300,7 @@ def export_validated_attributes_json(document_id: int, db: Session = Depends(get
 
 
 @router.get("/attributes/export/{document_id}/csv")
-def export_validated_attributes_csv(document_id: int, db: Session = Depends(get_db), user_id: CurrentUserId = None) -> Response:
+def export_validated_attributes_csv(document_id: int, user_id: CurrentUserId, db: Session = Depends(get_db)) -> Response:
     document, rows = _load_export_rows(document_id, db)
     if auth_required() and document.owner_id != user_id:
         raise HTTPException(status_code=404, detail="Document not found")

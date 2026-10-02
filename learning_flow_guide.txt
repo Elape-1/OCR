@@ -1,0 +1,54 @@
+OCR DOCUMENT LEARNING FLOW
+
+1. First run the 420 documents through the system to generate page images.
+   - This step creates the raw pages used for OCR and later model training.
+   - The system extracts per-page images from the uploaded documents.
+
+2. Use those page images to create the ground-truth dataset.
+   - OCR tokens and bounding boxes are generated.
+   - Human annotators label the correct fields and coordinates.
+   - The result is a JSONL file with records like:
+     - tokens
+     - bboxes
+     - labels
+     - document_id / page_id / image path
+
+3. Build the training dataset from the ground-truth JSONL.
+   - This is the actual learning data for the model.
+   - The training script reads this labeled data and learns patterns.
+
+4. Train the model.
+   - The code in backend/app/training.py reads the JSONL dataset.
+   - It splits data into train / validation / test sets.
+   - It trains LayoutLMv3 for token classification.
+   - It saves the trained model checkpoint and metadata.
+
+5. After training, run prediction on new documents or held-out validation/test data.
+   - This creates prediction JSONL files.
+   - These predictions are not the training input; they are the model output.
+
+6. Compare predictions against ground truth.
+   - This tells us how accurate the model is.
+   - Metrics include token accuracy, bbox IoU, and per-label performance.
+
+7. Once the model is good enough, use it on new real uploads.
+   - New documents go through OCR + inference.
+   - The model predicts fields and coordinates.
+   - A human reviewer can approve or correct results.
+
+Important note:
+- The predictions folder stays empty until a prediction step is run.
+- The ground-truth JSONL is the learning source.
+- The predictions JSONL is the result of the trained model.
+
+Simple order:
+Raw documents -> page images -> annotated JSONL ground truth -> train model -> prediction on new data -> evaluate -> use live
+
+Typical sequence:
+- Step A: generate page images
+- Step B: annotate ground truth
+- Step C: train
+- Step D: validate/test predictions
+- Step E: deploy on new uploads
+
+This is the workflow the codebase is designed around.

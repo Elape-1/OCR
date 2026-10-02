@@ -4,11 +4,13 @@ import logging
 import os
 from pathlib import Path
 import shutil
-from typing import Any, Dict, List
+from typing import Any, Dict, List, cast
 
 import cv2
+from cv2.typing import MatLike
 import numpy as np
 import pytesseract
+from numpy.typing import NDArray
 from PIL import Image
 from pytesseract import Output
 
@@ -56,13 +58,15 @@ def _configure_tesseract_cmd() -> None:
 _configure_tesseract_cmd()
 
 
-def preprocess_page_image(image_path: str | Path) -> np.ndarray:
-    processed, _ = _preprocess_page_image_with_transform(image_path)
+def preprocess_page_image(image_path: str | Path) -> MatLike:
+    processed, _, _ = _preprocess_page_image_with_transform(image_path)
     return processed
 
 
-def _preprocess_page_image_with_transform(image_path: str | Path) -> tuple[np.ndarray, np.ndarray, tuple[int, int]]:
-    image = cv2.imread(str(image_path))
+def _preprocess_page_image_with_transform(
+    image_path: str | Path,
+) -> tuple[MatLike, NDArray[np.float32], tuple[int, int]]:
+    image = cast(MatLike | None, cv2.imread(str(image_path)))
     if image is None:
         raise FileNotFoundError(f"Unable to load image: {image_path}")
 
@@ -92,7 +96,7 @@ def extract_tokens_with_bboxes(image_path: str | Path) -> List[Dict[str, Any]]:
     processed, processed_to_source, (source_width, source_height) = _preprocess_page_image_with_transform(image_path)
     height, width = processed.shape[:2]
     try:
-        data = pytesseract.image_to_data(
+        data: dict[str, list[str]] = pytesseract.image_to_data(
             processed,
             output_type=Output.DICT,
             config="--oem 1 --psm 3",
@@ -157,10 +161,10 @@ def extract_tokens_with_bboxes(image_path: str | Path) -> List[Dict[str, Any]]:
         return _fallback_tokens(processed, width, height, processed_to_source, source_width, source_height)
 
 def _fallback_tokens(
-    processed: np.ndarray,
+    processed: MatLike,
     width: int,
     height: int,
-    processed_to_source: np.ndarray | None = None,
+    processed_to_source: NDArray[np.float32] | NDArray[np.float64] | None = None,
     source_width: int | None = None,
     source_height: int | None = None,
 ) -> List[Dict[str, Any]]:
@@ -197,7 +201,10 @@ def _fallback_tokens(
 
 
 def _map_bbox_to_source(
-    bbox: List[int], processed_to_source: np.ndarray, source_width: int, source_height: int
+    bbox: List[int],
+    processed_to_source: NDArray[np.float32] | NDArray[np.float64],
+    source_width: int,
+    source_height: int,
 ) -> List[int]:
     x0, y0, x1, y1 = bbox
     corners = np.array(
@@ -231,7 +238,7 @@ def _clamp(value: float | int) -> int:
     return int(max(0, min(1000, value)))
 
 
-def _correct_orientation(image: np.ndarray) -> np.ndarray:
+def _correct_orientation(image: MatLike) -> MatLike:
     rotation = _detect_orientation_rotation(image)
     if rotation == 90:
         return cv2.rotate(image, cv2.ROTATE_90_CLOCKWISE)
@@ -242,9 +249,9 @@ def _correct_orientation(image: np.ndarray) -> np.ndarray:
     return image
 
 
-def _detect_orientation_rotation(image: np.ndarray) -> int:
+def _detect_orientation_rotation(image: MatLike) -> int:
     try:
-        osd = pytesseract.image_to_osd(Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)))
+        osd: str = pytesseract.image_to_osd(Image.fromarray(cv2.cvtColor(image, cv2.COLOR_BGR2RGB)))
         rotation = 0
         for line in osd.splitlines():
             if line.startswith("Rotate:"):
@@ -256,7 +263,7 @@ def _detect_orientation_rotation(image: np.ndarray) -> int:
     return 0
 
 
-def _orientation_transform(rotation: int, width: int, height: int) -> np.ndarray:
+def _orientation_transform(rotation: int, width: int, height: int) -> NDArray[np.float32]:
     if rotation == 90:
         return np.array([[0.0, -1.0, height - 1.0], [1.0, 0.0, 0.0]], dtype=np.float32)
     if rotation == 180:
@@ -266,12 +273,12 @@ def _orientation_transform(rotation: int, width: int, height: int) -> np.ndarray
     return np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)
 
 
-def _deskew(image: np.ndarray) -> np.ndarray:
+def _deskew(image: MatLike) -> MatLike:
     rotated, _ = _deskew_with_transform(image)
     return rotated
 
 
-def _deskew_with_transform(image: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _deskew_with_transform(image: MatLike) -> tuple[MatLike, NDArray[np.float32]]:
     coordinates = np.column_stack(np.where(image < 255))
     if coordinates.size == 0:
         return image, np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]], dtype=np.float32)

@@ -4,11 +4,13 @@ These tests mock pytesseract so they run without Tesseract installed.
 """
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Sequence
 from unittest.mock import MagicMock, patch
 
 import cv2
 import numpy as np
-import pytest
+from numpy.typing import NDArray
 
 
 # ---------------------------------------------------------------------------
@@ -16,23 +18,35 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _make_test_image(width: int = 800, height: int = 1100) -> np.ndarray:
+def _make_test_image(width: int = 800, height: int = 1100) -> NDArray[np.uint8]:
     """Create a simple grayscale test image with dark text on white."""
     img = np.full((height, width), 255, dtype=np.uint8)
-    cv2.putText(img, "HELLO WORLD", (50, height // 2),
-                cv2.FONT_HERSHEY_SIMPLEX, 3, 0, 5, cv2.LINE_AA)
+    cv2.putText(
+        img,
+        "HELLO WORLD",
+        (50, height // 2),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        3,
+        (0, 0, 0),
+        5,
+        cv2.LINE_AA,
+    )
     return img
+
+
+def _identity_image(image: NDArray[np.uint8]) -> NDArray[np.uint8]:
+    return image
 
 
 def _make_tesseract_dict(
     texts: list[str],
-    confs: list[int | float],
+    confs: Sequence[int | float],
     *,
     lefts: list[int] | None = None,
     tops: list[int] | None = None,
     widths: list[int] | None = None,
     heights: list[int] | None = None,
-) -> dict:
+) -> dict[str, list[str] | list[int | float] | list[int]]:
     """Build a dict matching pytesseract.image_to_data(output_type=DICT)."""
     n = len(texts)
     if lefts is None:
@@ -45,7 +59,7 @@ def _make_tesseract_dict(
         heights = [20] * n
     return {
         "text": texts,
-        "conf": confs,
+        "conf": list(confs),
         "left": lefts,
         "top": tops,
         "width": widths,
@@ -62,9 +76,9 @@ def _make_tesseract_dict(
 # ---------------------------------------------------------------------------
 
 
-@patch("app.ocr_processor._correct_orientation", side_effect=lambda img: img)
+@patch("app.ocr_processor._correct_orientation", side_effect=_identity_image)
 @patch("app.ocr_processor.pytesseract")
-def test_psm3_config_used(mock_tess, _mock_orient, tmp_path):
+def test_psm3_config_used(mock_tess: MagicMock, _: MagicMock, tmp_path: Path) -> None:
     """Verify that Tesseract is called with --psm 3 instead of --psm 6."""
     from app.ocr_processor import extract_tokens_with_bboxes
 
@@ -91,11 +105,11 @@ def test_psm3_config_used(mock_tess, _mock_orient, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-@patch("app.ocr_processor._correct_orientation", side_effect=lambda img: img)
+@patch("app.ocr_processor._correct_orientation", side_effect=_identity_image)
 @patch("app.ocr_processor.pytesseract")
-def test_confidence_filter_drops_low_tokens(mock_tess, _mock_orient, tmp_path):
+def test_confidence_filter_drops_low_tokens(mock_tess: MagicMock, _: MagicMock, tmp_path: Path) -> None:
     """Tokens with confidence < MIN_OCR_CONFIDENCE (25) should be removed."""
-    from app.ocr_processor import extract_tokens_with_bboxes, MIN_OCR_CONFIDENCE
+    from app.ocr_processor import extract_tokens_with_bboxes
 
     img = _make_test_image()
     img_path = tmp_path / "page.png"
@@ -118,9 +132,9 @@ def test_confidence_filter_drops_low_tokens(mock_tess, _mock_orient, tmp_path):
     assert "Garbage" not in token_texts
 
 
-@patch("app.ocr_processor._correct_orientation", side_effect=lambda img: img)
+@patch("app.ocr_processor._correct_orientation", side_effect=_identity_image)
 @patch("app.ocr_processor.pytesseract")
-def test_confidence_filter_keeps_boundary_tokens(mock_tess, _mock_orient, tmp_path):
+def test_confidence_filter_keeps_boundary_tokens(mock_tess: MagicMock, _: MagicMock, tmp_path: Path) -> None:
     """Tokens at exactly MIN_OCR_CONFIDENCE should survive."""
     from app.ocr_processor import extract_tokens_with_bboxes, MIN_OCR_CONFIDENCE
 
@@ -147,9 +161,9 @@ def test_confidence_filter_keeps_boundary_tokens(mock_tess, _mock_orient, tmp_pa
 # ---------------------------------------------------------------------------
 
 
-@patch("app.ocr_processor._correct_orientation", side_effect=lambda img: img)
+@patch("app.ocr_processor._correct_orientation", side_effect=_identity_image)
 @patch("app.ocr_processor.pytesseract")
-def test_blank_page_returns_empty(mock_tess, _mock_orient, tmp_path):
+def test_blank_page_returns_empty(mock_tess: MagicMock, _: MagicMock, tmp_path: Path) -> None:
     """A page with only 1-2 low-confidence tokens should return []."""
     from app.ocr_processor import extract_tokens_with_bboxes
 
@@ -168,9 +182,9 @@ def test_blank_page_returns_empty(mock_tess, _mock_orient, tmp_path):
     assert tokens == [], f"Expected empty list for blank page, got {len(tokens)} tokens"
 
 
-@patch("app.ocr_processor._correct_orientation", side_effect=lambda img: img)
+@patch("app.ocr_processor._correct_orientation", side_effect=_identity_image)
 @patch("app.ocr_processor.pytesseract")
-def test_blank_page_all_filtered(mock_tess, _mock_orient, tmp_path):
+def test_blank_page_all_filtered(mock_tess: MagicMock, _: MagicMock, tmp_path: Path) -> None:
     """A page where ALL tokens are below MIN_OCR_CONFIDENCE should return []."""
     from app.ocr_processor import extract_tokens_with_bboxes
 
@@ -188,9 +202,9 @@ def test_blank_page_all_filtered(mock_tess, _mock_orient, tmp_path):
     assert tokens == []
 
 
-@patch("app.ocr_processor._correct_orientation", side_effect=lambda img: img)
+@patch("app.ocr_processor._correct_orientation", side_effect=_identity_image)
 @patch("app.ocr_processor.pytesseract")
-def test_sparse_valid_page_not_blanked(mock_tess, _mock_orient, tmp_path):
+def test_sparse_valid_page_not_blanked(mock_tess: MagicMock, _: MagicMock, tmp_path: Path) -> None:
     """A page with few tokens but good confidence should NOT be treated as blank."""
     from app.ocr_processor import extract_tokens_with_bboxes
 
@@ -210,9 +224,9 @@ def test_sparse_valid_page_not_blanked(mock_tess, _mock_orient, tmp_path):
     assert tokens[0]["token"] == "Chapter"
 
 
-@patch("app.ocr_processor._correct_orientation", side_effect=lambda img: img)
+@patch("app.ocr_processor._correct_orientation", side_effect=_identity_image)
 @patch("app.ocr_processor.pytesseract")
-def test_normal_page_unaffected(mock_tess, _mock_orient, tmp_path):
+def test_normal_page_unaffected(mock_tess: MagicMock, _: MagicMock, tmp_path: Path) -> None:
     """A normal page with many high-confidence tokens passes through unchanged."""
     from app.ocr_processor import extract_tokens_with_bboxes
 
@@ -234,27 +248,39 @@ def test_normal_page_unaffected(mock_tess, _mock_orient, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_min_ocr_confidence_constant():
+def test_min_ocr_confidence_constant() -> None:
     """Verify the confidence threshold constant is importable and correct."""
     from app.ocr_processor import MIN_OCR_CONFIDENCE
     assert MIN_OCR_CONFIDENCE == 25
 
 
-def test_rotated_box_maps_back_to_source_coordinates():
-    from app.ocr_processor import _map_bbox_to_source, _orientation_transform
+@patch("app.ocr_processor._preprocess_page_image_with_transform")
+@patch("app.ocr_processor.pytesseract")
+def test_rotated_box_maps_back_to_source_coordinates(mock_tess: MagicMock, mock_preprocess: MagicMock) -> None:
+    from app.ocr_processor import extract_tokens_with_bboxes
 
-    transform = _orientation_transform(90, width=100, height=200)
     source_bbox = [10, 20, 30, 40]
     processed_bbox = [199 - source_bbox[3], source_bbox[0], 199 - source_bbox[1], source_bbox[2]]
+    transform = np.array([[0.0, -1.0, 199.0], [1.0, 0.0, 0.0]], dtype=np.float32)
+    mock_preprocess.return_value = (
+        np.full((200, 100), 255, dtype=np.uint8),
+        np.linalg.inv(np.vstack((transform, [0.0, 0.0, 1.0])))[:2],
+        (100, 200),
+    )
+    mock_tess.image_to_data.return_value = _make_tesseract_dict(
+        ["rotated"], [95], lefts=[processed_bbox[0]], tops=[processed_bbox[1]],
+        widths=[processed_bbox[2] - processed_bbox[0]], heights=[processed_bbox[3] - processed_bbox[1]],
+    )
+    mock_tess.Output = MagicMock()
 
-    assert _map_bbox_to_source(processed_bbox, np.linalg.inv(
-        np.vstack((transform, [0.0, 0.0, 1.0]))
-    )[:2], 100, 200) == source_bbox
+    tokens = extract_tokens_with_bboxes("ignored.png")
+
+    assert tokens[0]["absolute_bbox"] == source_bbox
 
 
 @patch("app.ocr_processor._preprocess_page_image_with_transform")
 @patch("app.ocr_processor.pytesseract")
-def test_ocr_boxes_are_normalized_to_source_dimensions(mock_tess, mock_preprocess):
+def test_ocr_boxes_are_normalized_to_source_dimensions(mock_tess: MagicMock, mock_preprocess: MagicMock) -> None:
     from app.ocr_processor import extract_tokens_with_bboxes
 
     processed = np.full((100, 200), 255, dtype=np.uint8)
@@ -273,29 +299,37 @@ def test_ocr_boxes_are_normalized_to_source_dimensions(mock_tess, mock_preproces
     assert tokens[0]["bbox"] == [50, 50, 100, 150]
 
 
-def test_preprocessing_returns_inverse_transform_for_box_mapping(tmp_path):
-    from app.ocr_processor import _preprocess_page_image_with_transform
+@patch("app.ocr_processor._deskew_with_transform")
+@patch("app.ocr_processor._detect_orientation_rotation", return_value=0)
+@patch("app.ocr_processor.pytesseract")
+def test_preprocessing_returns_inverse_transform_for_box_mapping(
+    mock_tess: MagicMock,
+    _mock_orientation: MagicMock,
+    mock_deskew: MagicMock,
+    tmp_path: Path,
+) -> None:
+    from app.ocr_processor import extract_tokens_with_bboxes
 
     image = _make_test_image(width=100, height=80)
     image_path = tmp_path / "deskewed.png"
     cv2.imwrite(str(image_path), image)
     deskew_transform = np.array([[1.0, 0.0, 7.0], [0.0, 1.0, -4.0]], dtype=np.float32)
+    mock_deskew.return_value = (np.full((80, 100), 255, dtype=np.uint8), deskew_transform)
+    mock_tess.image_to_data.return_value = _make_tesseract_dict(
+        ["source"], [95], lefts=[27], tops=[6], widths=[20], heights=[20]
+    )
+    mock_tess.Output = MagicMock()
 
-    with patch("app.ocr_processor._detect_orientation_rotation", return_value=0), patch(
-        "app.ocr_processor._deskew_with_transform",
-        return_value=(image, deskew_transform),
-    ):
-        _, processed_to_source, _ = _preprocess_page_image_with_transform(image_path)
+    tokens = extract_tokens_with_bboxes(str(image_path))
 
-    expected = np.linalg.inv(np.vstack((deskew_transform, [0.0, 0.0, 1.0])))[:2]
-    np.testing.assert_allclose(processed_to_source, expected)
+    assert tokens[0]["absolute_bbox"] == [20, 10, 40, 30]
 
 
-def test_min_page_tokens_constant():
+def test_min_page_tokens_constant() -> None:
     from app.ocr_processor import MIN_PAGE_TOKENS
     assert MIN_PAGE_TOKENS == 3
 
 
-def test_blank_page_confidence_constant():
+def test_blank_page_confidence_constant() -> None:
     from app.ocr_processor import BLANK_PAGE_CONFIDENCE
     assert BLANK_PAGE_CONFIDENCE == 30.0

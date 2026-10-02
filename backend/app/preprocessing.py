@@ -20,13 +20,21 @@ import logging
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Optional
+from typing import List, Optional, TypedDict, cast
 
 import cv2
+from cv2.typing import MatLike
 import numpy as np
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
+
+
+class _ProcessResult(TypedDict):
+    processed_image: MatLike | None
+    skew_angle: float
+    output_path: str | None
+    processing_time_ms: float
 
 
 class DocumentPreprocessor:
@@ -43,7 +51,7 @@ class DocumentPreprocessor:
     def __init__(self, use_nl_means: bool = False) -> None:
         self.use_nl_means = use_nl_means
 
-    def to_grayscale(self, image: np.ndarray) -> np.ndarray:
+    def to_grayscale(self, image: MatLike | None) -> MatLike:
         """Convert an image to single-channel grayscale.
 
         Accepts BGR or RGB arrays and returns an 8-bit grayscale image.
@@ -64,7 +72,7 @@ class DocumentPreprocessor:
             return gray
         raise ValueError(f"Unsupported image shape: {image.shape}")
 
-    def deskew(self, image: np.ndarray) -> tuple[np.ndarray, float]:
+    def deskew(self, image: MatLike) -> tuple[MatLike, float]:
         """Detect and correct skew using Hough line transform on Canny edges.
 
         Returns (rotated_image, angle_degrees). If no dominant lines are found
@@ -76,9 +84,17 @@ class DocumentPreprocessor:
         edges = cv2.Canny(gray, 50, 150)
         # HoughLinesP parameters scaled to page size
         min_line_length = max(30, w // 8)
-        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, threshold=80,
-                                minLineLength=min_line_length,
-                                maxLineGap=10)
+        lines = cast(
+            MatLike | None,
+            cv2.HoughLinesP(
+                edges,
+                1,
+                np.pi / 180,
+                threshold=80,
+                minLineLength=min_line_length,
+                maxLineGap=10,
+            ),
+        )
 
         angles: list[float] = []
         if lines is not None and len(lines) > 0:
@@ -105,7 +121,7 @@ class DocumentPreprocessor:
             try:
                 # Binary image for component geometry
                 _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-                coords = cv2.findNonZero(255 - bw)  # text pixels (non-white)
+                coords = cast(MatLike | None, cv2.findNonZero(255 - bw))  # text pixels (non-white)
                 if coords is not None and len(coords) > 0:
                     rect = cv2.minAreaRect(coords)
                     # rect[2] is angle in degrees in range [-90, 0)
@@ -129,7 +145,7 @@ class DocumentPreprocessor:
                                  borderMode=cv2.BORDER_REPLICATE)
         return rotated, median_angle
 
-    def denoise(self, image: np.ndarray) -> np.ndarray:
+    def denoise(self, image: MatLike | None) -> MatLike:
         """Reduce sensor/scan noise while preserving text edges.
 
         By default uses a small Gaussian blur (3x3). When `use_nl_means` is
@@ -148,8 +164,12 @@ class DocumentPreprocessor:
         denoised = cv2.GaussianBlur(gray, (3, 3), 0)
         return denoised
 
-    def apply_clahe(self, image: np.ndarray, clip_limit: float = 2.0,
-                    tile_grid_size: tuple = (8, 8)) -> np.ndarray:
+    def apply_clahe(
+        self,
+        image: MatLike,
+        clip_limit: float = 2.0,
+        tile_grid_size: tuple[int, int] = (8, 8),
+    ) -> MatLike:
         """Apply CLAHE (adaptive histogram equalization) to the grayscale image.
 
         This helps with uneven lighting and shadows from phone-camera scans.
@@ -163,7 +183,7 @@ class DocumentPreprocessor:
             logger.warning("CLAHE failed; returning original image")
             return gray
 
-    def adaptive_threshold(self, image: np.ndarray, invert: Optional[bool] = None) -> np.ndarray:
+    def adaptive_threshold(self, image: MatLike, invert: Optional[bool] = None) -> MatLike:
         """Convert the grayscale image to a binary image using adaptive thresholding.
 
         If `invert` is None the method will attempt to auto-detect inversion by
@@ -172,8 +192,6 @@ class DocumentPreprocessor:
         gray = image if len(image.shape) == 2 else self.to_grayscale(image)
         # blockSize must be odd and tuned for 300 DPI documents; use ~35
         block_size = 35 if (gray.shape[0] > 200 or gray.shape[1] > 200) else 15
-        if block_size % 2 == 0:
-            block_size += 1
         C = 10
         try:
             th = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -196,7 +214,7 @@ class DocumentPreprocessor:
 
         return th
 
-    def process(self, image_path: str, output_path: Optional[str] = None) -> dict:
+    def process(self, image_path: str, output_path: Optional[str] = None) -> _ProcessResult:
         """Run the full preprocessing pipeline on `image_path`.
 
         Returns a dict with keys:
@@ -210,7 +228,7 @@ class DocumentPreprocessor:
         """
         t0 = time.time()
         skew_angle = 0.0
-        processed: Optional[np.ndarray] = None
+        processed: MatLike | None = None
 
         if not os.path.exists(image_path):
             logger.warning("Image path does not exist: %s", image_path)
@@ -222,7 +240,7 @@ class DocumentPreprocessor:
             }
 
         try:
-            img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+            img = cast(MatLike | None, cv2.imread(image_path, cv2.IMREAD_UNCHANGED))
             if img is None:
                 raise IOError("cv2.imread returned None")
         except Exception as e:
@@ -291,7 +309,7 @@ class DocumentPreprocessor:
                 output_path = None
 
         processing_time_ms = (time.time() - t0) * 1000.0
-        result = {
+        result: _ProcessResult = {
             "processed_image": processed,
             "skew_angle": skew_angle,
             "output_path": output_path,
@@ -299,15 +317,20 @@ class DocumentPreprocessor:
         }
         return result
 
-    def batch_process(self, image_paths: List[str], output_dir: str, max_workers: int = 4) -> List[dict]:
+    def batch_process(
+        self,
+        image_paths: List[str],
+        output_dir: str,
+        max_workers: int = 4,
+    ) -> List[_ProcessResult]:
         """Process multiple images in parallel and return list of result dicts.
 
         Output files are written to `output_dir` preserving original filenames.
         """
         os.makedirs(output_dir, exist_ok=True)
-        results: List[dict] = []
+        results: List[_ProcessResult] = []
 
-        def _task(p: str) -> dict:
+        def _task(p: str) -> _ProcessResult:
             out_name = os.path.basename(p)
             out_path = os.path.join(output_dir, out_name)
             return self.process(p, out_path)

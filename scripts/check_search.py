@@ -1,6 +1,6 @@
 import urllib.request, json
 
-def fetch(url):
+def fetch(url: str) -> None:
     try:
         with urllib.request.urlopen(url, timeout=5) as resp:
             body = resp.read().decode('utf-8')

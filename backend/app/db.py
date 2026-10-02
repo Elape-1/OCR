@@ -17,7 +17,7 @@ DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DATABASE_URL)
 
 
 def _create_engine(database_url: str):
-    connect_args = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
+    connect_args: dict[str, bool | int] = {"check_same_thread": False} if database_url.startswith("sqlite") else {}
     if database_url.startswith("postgres") or database_url.startswith("postgresql"):
         connect_args["connect_timeout"] = int(os.getenv("DB_CONNECT_TIMEOUT", "5"))
     return create_engine(database_url, pool_pre_ping=True, connect_args=connect_args)
@@ -155,7 +155,7 @@ def set_rls_user(session: Session, user_id: str | None) -> None:
         )
 
 
-def get_db(user_id: CurrentUserId = None) -> Generator[Session, None, None]:
+def get_db(user_id: CurrentUserId) -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
         set_rls_user(db, user_id)

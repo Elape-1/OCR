@@ -1,8 +1,9 @@
+from collections.abc import Callable, Generator
 from datetime import datetime
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.db import get_db
@@ -11,7 +12,7 @@ from app.models import Attribute, Base, Document, Page
 
 
 
-def _build_session_factory():
+def _build_session_factory() -> sessionmaker[Session]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -21,8 +22,8 @@ def _build_session_factory():
     return sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 
 
-def _override_get_db(session):
-    def _dependency():
+def _override_get_db(session: Session) -> Callable[[], Generator[Session, None, None]]:
+    def _dependency() -> Generator[Session, None, None]:
         try:
             yield session
         finally:
@@ -31,8 +32,20 @@ def _override_get_db(session):
     return _dependency
 
 
-def make_document(db, name="search-test-doc", doc_type="invoice", status="PROCESSED"):
-    doc = Document(name=name, format="pdf", document_type=doc_type, page_count=1, status=status)
+def make_document(
+    db: Session,
+    name: str = "search-test-doc",
+    doc_type: str = "invoice",
+    status: str = "PROCESSED",
+) -> tuple[Document, Page]:
+    doc = Document(
+        name=name,
+        format="pdf",
+        document_type=doc_type,
+        page_count=1,
+        status=status,
+        owner_id="local-development-user",
+    )
     db.add(doc)
     db.flush()
     page = Page(document_id=doc.id, page_number=1, image_path=f"assets/{doc.id}/1.png")
@@ -41,11 +54,11 @@ def make_document(db, name="search-test-doc", doc_type="invoice", status="PROCES
     return doc, page
 
 
-def test_search_documents_basic():
+def test_search_documents_basic() -> None:
     factory = _build_session_factory()
     db = factory()
     try:
-        doc, page = make_document(db, name="unique-search-doc-123", doc_type="report", status="PROCESSED")
+        make_document(db, name="unique-search-doc-123", doc_type="report", status="PROCESSED")
         db.commit()
     finally:
         db.close()
@@ -64,7 +77,7 @@ def test_search_documents_basic():
         session.close()
 
 
-def test_search_attributes_basic():
+def test_search_attributes_basic() -> None:
     factory = _build_session_factory()
     db = factory()
     try:

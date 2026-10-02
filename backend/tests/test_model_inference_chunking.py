@@ -3,7 +3,6 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import torch
-import pytest
 from PIL import Image
 
 from app.model_inference import LayoutLMv3InferenceService
@@ -55,13 +54,41 @@ class FakeModel:
         return FakeModelOutput(logits)
 
 
-def test_base_layoutlm_checkpoint_is_rejected_for_extraction(monkeypatch) -> None:
-    from app.model_inference import DEFAULT_LAYOUTLMV3_MODEL_SOURCE
+def test_base_layoutlm_checkpoint_loads_schema_sized_token_classifier(monkeypatch) -> None:
+    import app.model_inference as model_inference
 
-    service = LayoutLMv3InferenceService(model_source=DEFAULT_LAYOUTLMV3_MODEL_SOURCE)
+    calls = {}
 
-    with pytest.raises(RuntimeError, match="trained token-classification checkpoint"):
-        service._ensure_loaded()
+    class FakeProcessorLoader:
+        @staticmethod
+        def from_pretrained(model_source, apply_ocr):
+            assert apply_ocr is False
+            return FakeProcessor()
+
+    class FakeModelLoader:
+        @staticmethod
+        def from_pretrained(model_source, **kwargs):
+            calls["model_source"] = model_source
+            calls.update(kwargs)
+            return FakeModel()
+
+    monkeypatch.setattr(model_inference, "LayoutLMv3Processor", FakeProcessorLoader)
+    monkeypatch.setattr(model_inference, "LayoutLMv3ForTokenClassification", FakeModelLoader)
+    service = LayoutLMv3InferenceService(ocr_only=False)
+
+    service._ensure_loaded("invoice")
+
+    assert calls["model_source"] == model_inference.DEFAULT_LAYOUTLMV3_MODEL_SOURCE
+    assert calls["num_labels"] == 6
+    assert calls["id2label"] == {
+        0: "other",
+        1: "invoice_number",
+        2: "invoice_date",
+        3: "vendor_name",
+        4: "bill_to",
+        5: "total_amount",
+    }
+    assert calls["label2id"]["total_amount"] == 5
 
 
 def test_ocr_only_mode_does_not_load_layoutlm(tmp_path) -> None:
@@ -84,10 +111,10 @@ def test_chunked_inference_preserves_all_tokens(tmp_path) -> None:
     image_path = tmp_path / "page.png"
     Image.new("RGB", (200, 200), "white").save(image_path)
 
-    service = LayoutLMv3InferenceService()
+    service = LayoutLMv3InferenceService(ocr_only=False)
     service.processor = FakeProcessor(max_length=6)
     service.model = FakeModel()
-    service._ensure_loaded = lambda: None
+    service._ensure_loaded = lambda document_type=None: None
 
     tokens = [f"token-{index}" for index in range(10)]
     bboxes = [[index * 5, 10, index * 5 + 4, 20] for index in range(10)]
@@ -111,10 +138,10 @@ def test_overlap_resolution_prefers_higher_confidence_prediction(tmp_path) -> No
     image_path = tmp_path / "page.png"
     Image.new("RGB", (200, 200), "white").save(image_path)
 
-    service = LayoutLMv3InferenceService()
+    service = LayoutLMv3InferenceService(ocr_only=False)
     service.processor = FakeProcessor(max_length=6)
     service.model = SimpleNamespace(config=SimpleNamespace(id2label={0: "other", 1: "date", 2: "vendor_name"}))
-    service._ensure_loaded = lambda: None
+    service._ensure_loaded = lambda document_type=None: None
 
     tokens = ["t0", "t1", "t2", "overlap", "t4", "t5"]
     bboxes = [[index * 5, 10, index * 5 + 4, 20] for index in range(len(tokens))]

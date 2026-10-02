@@ -65,17 +65,6 @@ function AuthConfigurationScreen() {
 const DEFAULT_PAGE = 'landing'
 const DEFAULT_FILTER = 'recent'
 const DEFAULT_ZOOM = 100
-const PROCESSING_MESSAGES = [
-  'Uploading document...',
-  'Running OCR...',
-  'Detecting document layout...',
-  'Extracting text...',
-  'Identifying document attributes...',
-  'Calculating confidence scores...',
-  'Saving extracted data...',
-  'Finalizing results...',
-]
-
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker
 
 function parseInitialRoute() {
@@ -888,11 +877,11 @@ function UploadPagePreview({ preview, fileName }) {
   )
 }
 
-function ProcessingPage({ activity, progress, etaLabel, preview, documentData, processingError, onRetry, onCancel, onBackToLibrary }) {
+function ProcessingPage({ activity, progress, etaLabel, documentData, processingError, onRetry, onCancel, onBackToLibrary }) {
   return (
     <div className="flex min-h-[calc(100vh-82px)] items-center justify-center px-4 py-8 lg:px-8">
       <div className="w-full max-w-5xl rounded-[32px] border border-slate-200 bg-white px-6 py-10 shadow-[0_10px_30px_rgba(15,23,42,0.05)] sm:px-10">
-        <div className="grid gap-10 lg:grid-cols-[1.2fr_0.8fr] lg:items-center">
+        <div className="grid gap-10 lg:grid-cols-1 lg:items-center">
           <div className="space-y-8 text-center lg:text-left">
             <div className="space-y-4">
               <p className="text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">Processing</p>
@@ -950,19 +939,6 @@ function ProcessingPage({ activity, progress, etaLabel, preview, documentData, p
             </div>
           </div>
 
-          <div className="mx-auto w-full max-w-sm space-y-4 rounded-[24px] border border-slate-200 bg-slate-50 p-4 lg:mx-0 lg:justify-self-end">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Uploaded file</p>
-              <div className="mt-3 flex justify-center rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
-                <UploadPagePreview preview={preview} fileName={documentData?.name} />
-              </div>
-            </div>
-
-            <div className="rounded-[20px] border border-slate-200 bg-white p-3 shadow-sm">
-              <p className="text-sm font-semibold text-slate-900">Current step</p>
-              <p className="mt-2 text-sm leading-6 text-slate-500">{activity}</p>
-            </div>
-          </div>
         </div>
       </div>
     </div>
@@ -1515,7 +1491,7 @@ function ViewerPage({
             })
           ) : (
             <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-4 py-14 text-center text-sm text-slate-500">
-              No attributes match the current search.
+              {viewerQuery ? 'No attributes match the current search.' : 'No attributes were extracted for this document yet.'}
             </div>
           )}
 
@@ -1874,8 +1850,6 @@ export default function App() {
     const isCurrent = () => active && !processingAbortRef.current && activeDocumentId === processingDocumentId
     processingAbortRef.current = false
     setProcessingError('')
-    const steps = PROCESSING_MESSAGES
-    let stepIndex = 0
     let timeoutId = null
 
     async function pollStatus() {
@@ -1894,10 +1868,14 @@ export default function App() {
         }
 
         setProcessingDocument(result)
-        setActivity(steps[stepIndex % steps.length])
         setProcessingProgress((current) => Math.max(current, mapStatusProgress(result.status)))
 
         const normalized = String(result.status || '').toUpperCase()
+        if (normalized === 'QUEUED') {
+          setActivity('Queued for extraction...')
+        } else if (normalized === 'PROCESSING') {
+          setActivity('Running OCR and extracting attributes...')
+        }
         if (normalized === 'PROCESSED') {
           setProcessingProgress(100)
           setActivity('Finalizing results...')
@@ -1919,7 +1897,6 @@ export default function App() {
           return
         }
 
-        stepIndex += 1
         timeoutId = window.setTimeout(pollStatus, 1800)
       } catch (error) {
         if (isCurrent()) {
@@ -2359,6 +2336,15 @@ export default function App() {
   }
 
   function handleSelectSearchResult(item) {
+    if (item?.id && item?.document_id && item?.entity_type_label) {
+      setActiveAttributeId(item.id)
+      setActiveDocumentId(item.document_id)
+      setViewerBundle(null)
+      setServerPopupOpen(false)
+      setPage('attribute')
+      return
+    }
+
     if (item.document_id && item.entity_type_label) {
       void openDocumentById(item.document_id)
     } else if (item.id) {
@@ -2662,7 +2648,6 @@ export default function App() {
             activity={activity}
             progress={processingProgress}
             etaLabel={processingEta}
-            preview={uploadPreview}
             documentData={processingDocument || documentData}
             processingError={processingError}
             onRetry={retryProcessing}

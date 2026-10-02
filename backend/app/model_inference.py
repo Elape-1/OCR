@@ -39,23 +39,36 @@ class LayoutLMv3InferenceService:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.processor = None
         self.model = None
+        self._loaded_document_type: str | None = None
 
-    def _ensure_loaded(self) -> None:
-        if self.processor is not None and self.model is not None:
+    def _ensure_loaded(self, document_type: str | None = None) -> None:
+        if self.processor is not None and self.model is not None and (
+            self.model_source != DEFAULT_LAYOUTLMV3_MODEL_SOURCE
+            or self._loaded_document_type == document_type
+        ):
             return
         if self.ocr_only:
             return
-        if self.model_source == DEFAULT_LAYOUTLMV3_MODEL_SOURCE:
-            raise RuntimeError(
-                "LayoutLMv3 extraction requires a trained token-classification checkpoint. "
-                "Set LAYOUTLMV3_MODEL_SOURCE to the trained checkpoint or set LAYOUTLMV3_OCR_ONLY=true."
-            )
         if LayoutLMv3ForTokenClassification is None or LayoutLMv3Processor is None:
             raise RuntimeError("LayoutLMv3 dependencies are unavailable") from _TRANSFORMERS_IMPORT_ERROR
         # We supply OCR words and normalized boxes from our own OCR pipeline.
         # apply_ocr must be disabled to avoid transformer-side OCR conflicts.
-        self.processor = LayoutLMv3Processor.from_pretrained(self.model_source, apply_ocr=False)
-        self.model = LayoutLMv3ForTokenClassification.from_pretrained(self.model_source)
+        if self.processor is None:
+            self.processor = LayoutLMv3Processor.from_pretrained(self.model_source, apply_ocr=False)
+        if self.model_source == DEFAULT_LAYOUTLMV3_MODEL_SOURCE:
+            schema = get_document_schema(document_type)
+            labels = ["other", *schema.expected_fields]
+            label2id = {label: index for index, label in enumerate(labels)}
+            id2label = {index: label for label, index in label2id.items()}
+            self.model = LayoutLMv3ForTokenClassification.from_pretrained(
+                self.model_source,
+                num_labels=len(labels),
+                id2label=id2label,
+                label2id=label2id,
+            )
+            self._loaded_document_type = document_type
+        else:
+            self.model = LayoutLMv3ForTokenClassification.from_pretrained(self.model_source)
         self.model.to(self.device)
         self.model.eval()
 
@@ -68,7 +81,7 @@ class LayoutLMv3InferenceService:
     ) -> Dict[str, Any]:
         if self.ocr_only:
             return self._build_ocr_only_result(image_path, tokens, normalized_bboxes, document_type)
-        self._ensure_loaded()
+        self._ensure_loaded(document_type)
         id2label = self.model.config.id2label
         schema = get_document_schema(document_type)
 

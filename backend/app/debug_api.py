@@ -11,12 +11,12 @@ MAX_DEBUG_UPLOAD_BYTES = int(os.getenv("DEBUG_UPLOAD_MAX_BYTES", str(10 * 1024 *
 
 
 @router.post("/debug/echo")
-async def echo(payload: dict, user_id: CurrentUserId = None) -> dict:
+async def echo(payload: dict[str, object], user_id: CurrentUserId) -> dict[str, object]:
     return {"received": payload}
 
 
 @router.post("/debug/upload_test")
-async def upload_test(file: UploadFile = File(...), user_id: CurrentUserId = None) -> dict:
+async def upload_test(user_id: CurrentUserId, file: UploadFile = File(...)) -> dict[str, str | int | None]:
     """Accept a single file and return its name and size for debugging browser uploads."""
     size = 0
     chunk_size = 64 * 1024

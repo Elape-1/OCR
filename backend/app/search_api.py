@@ -4,7 +4,7 @@ from typing import Any
 from datetime import date, datetime, time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import String, and_, cast, func, or_, select
+from sqlalchemy import ColumnElement, String, and_, cast, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.db import get_db
@@ -26,14 +26,14 @@ def _parse_search_datetime(value: str, *, end_of_day: bool = False) -> datetime:
 
 
 @router.get("/search/document-types")
-def list_document_types(db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
+def list_document_types(user_id: CurrentUserId, db: Session = Depends(get_db)) -> dict[str, Any]:
     statement = select(func.distinct(Document.document_type)).where(owner_scope(Document.owner_id, user_id)).order_by(Document.document_type)
     rows = db.execute(statement).scalars().all()
     return {"document_types": [r for r in rows if r is not None]}
 
 
 @router.get("/search/attribute-names")
-def list_attribute_names(db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
+def list_attribute_names(user_id: CurrentUserId, db: Session = Depends(get_db)) -> dict[str, Any]:
     statement = select(func.distinct(Attribute.entity_type_label)).join(Document).where(owner_scope(Document.owner_id, user_id)).order_by(Attribute.entity_type_label)
     rows = db.execute(statement).scalars().all()
     return {"attribute_names": [r for r in rows if r is not None]}
@@ -41,6 +41,7 @@ def list_attribute_names(db: Session = Depends(get_db), user_id: CurrentUserId =
 
 @router.get("/search/documents")
 def search_documents(
+    user_id: CurrentUserId,
     q: str | None = Query(None, description="Search text for filename or attributes"),
     document_type: str | None = Query(None),
     status: str | None = Query(None),
@@ -49,10 +50,9 @@ def search_documents(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=500),
     db: Session = Depends(get_db),
-    user_id: CurrentUserId = None,
-):
+) -> dict[str, Any]:
     stmt = select(Document)
-    filters = []
+    filters: list[ColumnElement[bool]] = []
     # Default searches show completed documents; an explicit status searches that
     # lifecycle state instead of intersecting with the completed-state filter.
     if status:
@@ -99,7 +99,7 @@ def search_documents(
     stmt = stmt.order_by(Document.timestamp.desc()).offset(offset).limit(page_size)
 
     rows = db.execute(stmt).scalars().all()
-    documents = [
+    documents: list[dict[str, Any]] = [
         {
             "id": d.id,
             "name": d.name,
@@ -120,6 +120,7 @@ def search_documents(
 
 @router.get("/search/attributes")
 def search_attributes(
+    user_id: CurrentUserId,
     q: str | None = Query(None, description="Search text for attribute name or value"),
     attribute_name: str | None = Query(None),
     min_conf: float | None = Query(None, ge=0.0, le=1.0),
@@ -129,13 +130,12 @@ def search_attributes(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=500),
     db: Session = Depends(get_db),
-    user_id: CurrentUserId = None,
-):
+) -> dict[str, Any]:
     # consider attributes that are validated/approved (or processed)
     # note: do not require the parent document to be approved so saved attributes
     # on documents that may still be transitioning are discoverable in search results
     stmt = select(Attribute).join(Document, Attribute.document_id == Document.id)
-    filters = []
+    filters: list[ColumnElement[bool]] = []
     filters.append(Attribute.validation_status.in_( ["APPROVED", "PROCESSED"]))
     filters.append(owner_scope(Document.owner_id, user_id))
 
@@ -172,7 +172,7 @@ def search_attributes(
     stmt = stmt.order_by(Attribute.confidence_score.desc()).offset(offset).limit(page_size)
 
     rows = db.execute(stmt).scalars().all()
-    attributes = []
+    attributes: list[dict[str, Any]] = []
     for a in rows:
         # Determine if corrected
         corrected = db.execute(select(func.count()).select_from(Correction).where(Correction.attribute_id == a.id)).scalar_one() > 0

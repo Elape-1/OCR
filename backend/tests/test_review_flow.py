@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+from collections.abc import Callable, Generator
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app import ingestion_pipeline
@@ -15,7 +17,7 @@ from app.main import app
 from app.models import Attribute, Base, Correction, Document, Page
 
 
-def _build_session_factory():
+def _build_session_factory() -> sessionmaker[Session]:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -25,8 +27,8 @@ def _build_session_factory():
     return sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
 
 
-def _override_get_db(session):
-    def _dependency():
+def _override_get_db(session: Session) -> Callable[[], Generator[Session, None, None]]:
+    def _dependency() -> Generator[Session, None, None]:
         try:
             yield session
         finally:
@@ -49,7 +51,9 @@ def test_document_status_endpoint_validates_transitions_and_prerequisites() -> N
         assert client.patch(f"/api/v1/documents/{document_id}/status?status=unknown").status_code == 400
         assert client.patch(f"/api/v1/documents/{document_id}/status?status=PROCESSED").status_code == 400
         assert client.patch(f"/api/v1/documents/{document_id}/status?status=PROCESSING").status_code == 400
-        assert session.get(Document, document_id).status == "QUEUED"
+        unchanged_document = session.get(Document, document_id)
+        assert unchanged_document is not None
+        assert unchanged_document.status == "QUEUED"
     finally:
         app.dependency_overrides.clear()
         session.close()
@@ -69,13 +73,18 @@ def test_document_status_endpoint_persists_canceled_state() -> None:
         response = client.patch(f"/api/v1/documents/{document_id}/status?status=CANCELED")
         assert response.status_code == 200
         assert response.json()["status"] == "CANCELED"
-        assert session.get(Document, document_id).status == "CANCELED"
+        canceled_document = session.get(Document, document_id)
+        assert canceled_document is not None
+        assert canceled_document.status == "CANCELED"
     finally:
         app.dependency_overrides.clear()
         session.close()
 
 
-def test_processing_stages_attributes_without_persisting(tmp_path, monkeypatch) -> None:
+def test_processing_stages_attributes_without_persisting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     factory = _build_session_factory()
     seed_session = factory()
     document = Document(name="sample.pdf", format="pdf", owner_id="local-development-user", page_count=0, status="QUEUED")
@@ -90,16 +99,19 @@ def test_processing_stages_attributes_without_persisting(tmp_path, monkeypatch) 
     rasterized_page.write_bytes(b"fake-png")
 
     monkeypatch.setattr(ingestion_pipeline, "SessionLocal", factory)
-    monkeypatch.setattr(ingestion_pipeline, "_rasterize_pdf", lambda path, doc_id: [rasterized_page])
-    monkeypatch.setattr(
-        ingestion_pipeline,
-        "_detect_document_type",
-        lambda page_paths, original_name: {"document_type": "invoice"},
-    )
-    monkeypatch.setattr(
-        ingestion_pipeline,
-        "_build_attribute_payloads_for_page",
-        lambda page_id, doc_id, image_path, document_type=None: [
+    def fake_rasterize(path: Path, doc_id: str) -> list[Path]:
+        return [rasterized_page]
+
+    def fake_detect_document_type(page_paths: list[Path], original_name: str) -> dict[str, str]:
+        return {"document_type": "invoice"}
+
+    def fake_attribute_payloads(
+        page_id: int,
+        doc_id: int,
+        image_path: Path,
+        document_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return [
             {
                 "entity_type_label": "TOTAL",
                 "extracted_value": "123.45",
@@ -107,8 +119,11 @@ def test_processing_stages_attributes_without_persisting(tmp_path, monkeypatch) 
                 "confidence_score": 0.91,
                 "validation_status": "APPROVED",
             }
-        ],
-    )
+        ]
+
+    monkeypatch.setattr(ingestion_pipeline, "_rasterize_pdf", fake_rasterize)
+    monkeypatch.setattr(ingestion_pipeline, "_detect_document_type", fake_detect_document_type)
+    monkeypatch.setattr(ingestion_pipeline, "_build_attribute_payloads_for_page", fake_attribute_payloads)
 
     result = ingestion_pipeline.process_document_job(document_id, str(source_path), "sample.pdf", "local-development-user")
     assert result["status"] == "processed"
@@ -132,7 +147,10 @@ def test_processing_stages_attributes_without_persisting(tmp_path, monkeypatch) 
         verify_session.close()
 
 
-def test_processing_worker_downloads_source_storage_key(tmp_path, monkeypatch) -> None:
+def test_processing_worker_downloads_source_storage_key(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     factory = _build_session_factory()
     seed_session = factory()
     document = Document(name="remote.pdf", format="pdf", owner_id="local-development-user", page_count=0, status="QUEUED")
@@ -143,27 +161,40 @@ def test_processing_worker_downloads_source_storage_key(tmp_path, monkeypatch) -
 
     rasterized_page = tmp_path / "page-001.png"
     rasterized_page.write_bytes(b"fake-png")
-    downloaded_keys = []
+    downloaded_keys: list[str] = []
 
-    def fake_download(key):
+    def fake_download(key: str) -> bytes:
         downloaded_keys.append(key)
         return b"downloaded-pdf"
 
-    def fake_rasterize(path, doc_id):
+    def fake_rasterize(path: Path, doc_id: str) -> list[Path]:
         assert path.read_bytes() == b"downloaded-pdf"
         return [rasterized_page]
 
+    def fake_detect_document_type(page_paths: list[Path], original_name: str) -> dict[str, str]:
+        return {"document_type": "invoice"}
+
+    def no_attribute_payloads(
+        page_id: int,
+        doc_id: int,
+        image_path: Path,
+        document_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return []
+
+    def storage_is_enabled() -> bool:
+        return True
+
+    def ignore_upload(path: Path, object_key: str) -> None:
+        return None
+
     monkeypatch.setattr(ingestion_pipeline, "SessionLocal", factory)
-    monkeypatch.setattr(ingestion_pipeline, "storage_enabled", lambda: True)
+    monkeypatch.setattr(ingestion_pipeline, "storage_enabled", storage_is_enabled)
     monkeypatch.setattr(ingestion_pipeline, "download_file", fake_download)
     monkeypatch.setattr(ingestion_pipeline, "_rasterize_pdf", fake_rasterize)
-    monkeypatch.setattr(
-        ingestion_pipeline,
-        "_detect_document_type",
-        lambda page_paths, original_name: {"document_type": "invoice"},
-    )
-    monkeypatch.setattr(ingestion_pipeline, "_build_attribute_payloads_for_page", lambda *args, **kwargs: [])
-    monkeypatch.setattr(ingestion_pipeline, "upload_file", lambda *args, **kwargs: None)
+    monkeypatch.setattr(ingestion_pipeline, "_detect_document_type", fake_detect_document_type)
+    monkeypatch.setattr(ingestion_pipeline, "_build_attribute_payloads_for_page", no_attribute_payloads)
+    monkeypatch.setattr(ingestion_pipeline, "upload_file", ignore_upload)
 
     result = ingestion_pipeline.process_document_job(
         document_id,
@@ -176,7 +207,10 @@ def test_processing_worker_downloads_source_storage_key(tmp_path, monkeypatch) -
     assert downloaded_keys == ["owner/document/source.pdf"]
 
 
-def test_reprocessing_failure_preserves_previous_success(tmp_path, monkeypatch) -> None:
+def test_reprocessing_failure_preserves_previous_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     factory = _build_session_factory()
     old_page_path = tmp_path / "old-page.png"
     old_page_path.write_bytes(b"old-page")
@@ -205,18 +239,27 @@ def test_reprocessing_failure_preserves_previous_success(tmp_path, monkeypatch) 
     seed_session.close()
 
     monkeypatch.setattr(ingestion_pipeline, "SessionLocal", factory)
-    monkeypatch.setattr(ingestion_pipeline, "_rasterize_pdf", lambda path, artifact_id: [new_page_path])
-    monkeypatch.setattr(
-        ingestion_pipeline,
-        "_detect_document_type",
-        lambda page_paths, original_name: {"document_type": "invoice"},
-    )
-    monkeypatch.setattr(ingestion_pipeline, "upload_file", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        ingestion_pipeline,
-        "_build_attribute_payloads_for_page",
-        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("model failed")),
-    )
+    def fake_rasterize(path: Path, artifact_id: str) -> list[Path]:
+        return [new_page_path]
+
+    def fake_detect_document_type(page_paths: list[Path], original_name: str) -> dict[str, str]:
+        return {"document_type": "invoice"}
+
+    def ignore_upload(path: Path, object_key: str) -> None:
+        return None
+
+    def fail_attribute_payloads(
+        page_id: int,
+        doc_id: int,
+        image_path: Path,
+        document_type: str | None = None,
+    ) -> list[dict[str, Any]]:
+        raise RuntimeError("model failed")
+
+    monkeypatch.setattr(ingestion_pipeline, "_rasterize_pdf", fake_rasterize)
+    monkeypatch.setattr(ingestion_pipeline, "_detect_document_type", fake_detect_document_type)
+    monkeypatch.setattr(ingestion_pipeline, "upload_file", ignore_upload)
+    monkeypatch.setattr(ingestion_pipeline, "_build_attribute_payloads_for_page", fail_attribute_payloads)
 
     with pytest.raises(RuntimeError, match="model failed"):
         ingestion_pipeline.process_document_job(document_id, str(source_path), "reprocess.pdf", "local-development-user")
@@ -224,6 +267,7 @@ def test_reprocessing_failure_preserves_previous_success(tmp_path, monkeypatch) 
     verify_session = factory()
     try:
         refreshed = verify_session.get(Document, document_id)
+        assert refreshed is not None
         assert refreshed.status == "PROCESSED"
         assert refreshed.page_count == 1
         assert verify_session.get(Page, old_page_id) is not None
@@ -233,40 +277,52 @@ def test_reprocessing_failure_preserves_previous_success(tmp_path, monkeypatch) 
         verify_session.close()
 
 
-def test_docx_processing_uses_page_aware_pdf_rasterization(tmp_path, monkeypatch) -> None:
+def test_docx_processing_uses_page_aware_pdf_rasterization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     source_path = tmp_path / "multi-page.docx"
     source_path.write_bytes(b"not a real docx")
     rasterized_pages = [tmp_path / "page-001.png", tmp_path / "page-002.png"]
-    convert_calls = []
+    convert_calls: list[tuple[Path, Path]] = []
 
-    def fake_convert(path, output_dir):
+    def fake_convert(path: Path, output_dir: Path) -> None:
         convert_calls.append((path, output_dir))
         (output_dir / "multi-page.pdf").write_bytes(b"fake-pdf")
 
     monkeypatch.setattr(ingestion_pipeline, "_convert_with_libreoffice", fake_convert)
-    monkeypatch.setattr(ingestion_pipeline, "_rasterize_pdf", lambda path, document_id: rasterized_pages)
+    def fake_rasterize(path: Path, document_id: str) -> list[Path]:
+        return rasterized_pages
 
-    result = ingestion_pipeline._rasterize_office_document(source_path, "document-1")
+    monkeypatch.setattr(ingestion_pipeline, "_rasterize_pdf", fake_rasterize)
+
+    result = ingestion_pipeline.rasterize_office_document(source_path, "document-1")
 
     assert result == rasterized_pages
     assert len(convert_calls) == 1
     assert convert_calls[0][0] == source_path
 
 
-def test_docx_conversion_failure_is_explicit(tmp_path, monkeypatch) -> None:
+def test_docx_conversion_failure_is_explicit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     source_path = tmp_path / "unrenderable.docx"
     source_path.write_bytes(b"not a real docx")
 
-    def fail_conversion(path, output_dir):
+    def fail_conversion(path: Path, output_dir: Path) -> None:
         raise RuntimeError("LibreOffice unavailable")
 
     monkeypatch.setattr(ingestion_pipeline, "_convert_with_libreoffice", fail_conversion)
 
     with pytest.raises(RuntimeError, match="Failed to rasterize office document"):
-        ingestion_pipeline._rasterize_office_document(source_path, "document-1")
+        ingestion_pipeline.rasterize_office_document(source_path, "document-1")
 
 
-def test_processing_missing_source_marks_document_failed(tmp_path, monkeypatch) -> None:
+def test_processing_missing_source_marks_document_failed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     factory = _build_session_factory()
     seed_session = factory()
     document = Document(name="missing.pdf", format="pdf", owner_id="local-development-user", page_count=0, status="QUEUED")
@@ -377,7 +433,9 @@ def test_save_selected_persists_only_requested_attributes_and_manual_entries() -
         saved_attributes = session.query(Attribute).order_by(Attribute.id).all()
         assert len(saved_attributes) == 2
         assert {attribute.source for attribute in saved_attributes} == {"model", "manual"}
-        assert session.get(Document, document.id).extracted_attributes == []
+        saved_document = session.get(Document, document.id)
+        assert saved_document is not None
+        assert saved_document.extracted_attributes == []
     finally:
         app.dependency_overrides.clear()
         session.close()
@@ -683,7 +741,7 @@ def test_save_selected_returns_attribute_details() -> None:
         assert response.status_code == 200
         payload = response.json()
         assert payload["saved_count"] == 1
-        saved_ids = payload.get("saved_attribute_ids") or []
+        saved_ids: list[int] = payload.get("saved_attribute_ids") or []
         assert len(saved_ids) == 1
 
         # Fetch attribute detail and validate values persisted

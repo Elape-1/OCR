@@ -13,7 +13,7 @@ import uuid
 from typing import Any, List
 from io import BytesIO
 
-import fitz
+import pymupdf
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from PIL import Image, ImageDraw, ImageFont, ImageSequence
@@ -31,7 +31,7 @@ from app.document_schemas import classify_document_type
 from app.model_inference import LayoutLMv3InferenceService
 from app.models import Attribute, Document as DocumentRecord, Page
 from app.ocr_processor import extract_tokens_with_bboxes
-from app.routing_engine import build_attribute_payloads
+from app.routing_engine import build_attribute_payloads, build_ocr_baseline_payloads
 from app.tasks import celery_app
 from app.storage import delete_file, download_file, storage_enabled, upload_file
 
@@ -94,7 +94,7 @@ def _transition_document_status(document: DocumentRecord, target_status: str) ->
 
 
 @router.post("/ingest/validate")
-async def validate_upload(file: UploadFile = File(...), user_id: CurrentUserId = None) -> dict[str, Any]:
+async def validate_upload(user_id: CurrentUserId, file: UploadFile = File(...)) -> dict[str, Any]:
     extension = Path(file.filename or "").suffix.lower()
     content_type = (file.content_type or "").lower()
     if extension not in SUPPORTED_FORMATS:
@@ -116,8 +116,8 @@ async def validate_upload(file: UploadFile = File(...), user_id: CurrentUserId =
 
 
 @router.post("/ingest")
-async def ingest_document(file: UploadFile = File(...), db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
-    validation = await validate_upload(file)
+async def ingest_document(user_id: CurrentUserId, file: UploadFile = File(...), db: Session = Depends(get_db)) -> dict[str, Any]:
+    validation = await validate_upload(user_id=user_id, file=file)
     UPLOAD_ROOT.mkdir(parents=True, exist_ok=True)
 
     extension = Path(file.filename or "document").suffix.lower()
@@ -183,7 +183,7 @@ async def ingest_document(file: UploadFile = File(...), db: Session = Depends(ge
 
 
 @router.post("/documents/{document_id}/reprocess")
-def reprocess_document(document_id: int, db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
+def reprocess_document(document_id: int, user_id: CurrentUserId, db: Session = Depends(get_db)) -> dict[str, Any]:
     document = db.query(DocumentRecord).filter(
         DocumentRecord.id == document_id,
         owner_scope(DocumentRecord.owner_id, user_id),
@@ -214,7 +214,7 @@ def reprocess_document(document_id: int, db: Session = Depends(get_db), user_id:
 
 
 @router.get("/documents/{document_id}")
-def get_document(document_id: int, db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
+def get_document(document_id: int, user_id: CurrentUserId, db: Session = Depends(get_db)) -> dict[str, Any]:
     document = db.query(DocumentRecord).filter(DocumentRecord.id == document_id, owner_scope(DocumentRecord.owner_id, user_id)).first()
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -240,12 +240,12 @@ def get_document(document_id: int, db: Session = Depends(get_db), user_id: Curre
 
 
 @router.get("/documents/{document_id}/attributes")
-def get_document_attributes(document_id: int, db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
+def get_document_attributes(document_id: int, user_id: CurrentUserId, db: Session = Depends(get_db)) -> dict[str, Any]:
     document = db.query(DocumentRecord).filter(DocumentRecord.id == document_id, owner_scope(DocumentRecord.owner_id, user_id)).first()
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    saved_attribute_rows = []
+    saved_attribute_rows: list[dict[str, Any]] = []
     for page in document.pages:
         saved_attribute_rows.extend(
             [
@@ -267,7 +267,7 @@ def get_document_attributes(document_id: int, db: Session = Depends(get_db), use
             ]
         )
 
-    staged_attribute_rows = [
+    staged_attribute_rows: list[dict[str, Any]] = [
         {
             "temp_id": item.get("temp_id") or f"staged-{index}",
             "page_id": item.get("page_id"),
@@ -284,7 +284,6 @@ def get_document_attributes(document_id: int, db: Session = Depends(get_db), use
             "saved": False,
         }
         for index, item in enumerate(document.extracted_attributes or [], start=1)
-        if isinstance(item, dict)
     ]
 
     # During draft review, prioritize staged attributes so unapproved items remain actionable.
@@ -298,7 +297,7 @@ def get_document_attributes(document_id: int, db: Session = Depends(get_db), use
 
 
 @router.get("/documents")
-def list_documents(q: str | None = Query(None), limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
+def list_documents(user_id: CurrentUserId, q: str | None = Query(None), limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db)) -> dict[str, Any]:
     query = (q or "").strip().lower()
     statement = db.query(DocumentRecord).options(
         selectinload(DocumentRecord.pages).selectinload(Page.attributes)
@@ -348,7 +347,7 @@ def list_documents(q: str | None = Query(None), limit: int = Query(50, ge=1, le=
                 "format": document.format,
                 "document_type": document.document_type,
                 "page_count": document.page_count,
-                "timestamp": document.timestamp,
+                "timestamp": document.processing_finished_at or document.timestamp,
                 "status": document.status,
                 "attribute_count": len(attribute_summaries),
                 "attribute_summaries": attribute_summaries[:6],
@@ -368,7 +367,7 @@ def list_documents(q: str | None = Query(None), limit: int = Query(50, ge=1, le=
 
 
 @router.get("/documents/{document_id}/ocr")
-def get_document_ocr(document_id: int, db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
+def get_document_ocr(document_id: int, user_id: CurrentUserId, db: Session = Depends(get_db)) -> dict[str, Any]:
     document = db.query(DocumentRecord).filter(DocumentRecord.id == document_id, owner_scope(DocumentRecord.owner_id, user_id)).first()
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -419,7 +418,7 @@ def get_document_ocr(document_id: int, db: Session = Depends(get_db), user_id: C
 
 
 @router.patch("/documents/{document_id}/status")
-def update_document_status(document_id: int, status: str, db: Session = Depends(get_db), user_id: CurrentUserId = None) -> dict[str, Any]:
+def update_document_status(document_id: int, status: str, user_id: CurrentUserId, db: Session = Depends(get_db)) -> dict[str, Any]:
     document = db.query(DocumentRecord).filter(DocumentRecord.id == document_id, owner_scope(DocumentRecord.owner_id, user_id)).first()
     if document is None:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -440,8 +439,8 @@ def update_document_status(document_id: int, status: str, db: Session = Depends(
 def get_document_page_image(
     document_id: int,
     page_number: int,
+    user_id: CurrentUserId,
     db: Session = Depends(get_db),
-    user_id: CurrentUserId = None,
 ) -> Response:
     document = db.query(DocumentRecord).filter(DocumentRecord.id == document_id, owner_scope(DocumentRecord.owner_id, user_id)).first()
     if document is None:
@@ -547,7 +546,7 @@ def process_document_job(document_id: int, source_key: str, original_name: str, 
         if extension == ".pdf":
             page_paths = _rasterize_pdf(path, processing_artifact_id)
         elif extension in {".docx", ".doc"}:
-            page_paths = _rasterize_office_document(path, processing_artifact_id)
+            page_paths = rasterize_office_document(path, processing_artifact_id)
         elif extension in IMAGE_EXTENSIONS:
             page_paths = _normalize_image_document(path, processing_artifact_id)
         else:
@@ -565,17 +564,18 @@ def process_document_job(document_id: int, source_key: str, original_name: str, 
         staged_attributes: list[dict[str, Any]] = []
 
         for index, page_path in enumerate(page_paths, start=1):
+            storage_key = f"{document.owner_id}/{processing_artifact_id}/pages/page-{index:03d}.png"
             page = Page(
                 document_id=document_id,
                 page_number=index,
                 image_path=str(page_path),
-                storage_key=f"{document.owner_id}/{processing_artifact_id}/pages/page-{index:03d}.png",
+                storage_key=storage_key,
             )
             db.add(page)
             db.flush()
             new_page_ids.append(page.id)
-            new_storage_keys.append(page.storage_key)
-            upload_file(page_path, page.storage_key)
+            new_storage_keys.append(storage_key)
+            upload_file(page_path, storage_key)
 
             attribute_payloads = _build_attribute_payloads_for_page(
                 page.id,
@@ -714,17 +714,19 @@ def _rasterize_pdf(path: Path, document_id: str) -> List[Path]:
     asset_dir = RAW_DATASET_ROOT / str(document_id)
     asset_dir.mkdir(parents=True, exist_ok=True)
     try:
-        pdf_document = fitz.open(str(path))
+        pdf_document = pymupdf.open(str(path))
     except Exception as exc:
         logger.exception("PDF rasterization failed for %s", path)
         raise RuntimeError(f"Failed to rasterize PDF document: {path}") from exc
 
     page_paths: List[Path] = []
     try:
-        for index, page in enumerate(pdf_document, start=1):
+        for page_index in range(len(pdf_document)):
+            page = pdf_document.load_page(page_index)
+            index = page_index + 1
             output_path = asset_dir / f"page-{index:03d}.png"
             raster_dpi = max(72, int(os.getenv("OCR_RASTER_DPI", "300")))
-            matrix = fitz.Matrix(raster_dpi / 72, raster_dpi / 72)
+            matrix = pymupdf.Matrix(raster_dpi / 72, raster_dpi / 72)
             pixmap = page.get_pixmap(matrix=matrix, alpha=False)
             pixmap.save(str(output_path))
             del pixmap
@@ -734,7 +736,7 @@ def _rasterize_pdf(path: Path, document_id: str) -> List[Path]:
     return page_paths
 
 
-def _rasterize_office_document(path: Path, document_id: str) -> List[Path]:
+def rasterize_office_document(path: Path, document_id: str) -> List[Path]:
     asset_dir = RAW_DATASET_ROOT / str(document_id)
     asset_dir.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -783,7 +785,7 @@ def _convert_with_libreoffice(source_path: Path, output_dir: Path) -> None:
 
 
 def _rasterize_docx_fallback(path: Path, document_id: str) -> List[Path]:
-    document = DocxDocument(path)
+    document = DocxDocument(str(path))
     asset_dir = RAW_DATASET_ROOT / str(document_id)
     asset_dir.mkdir(parents=True, exist_ok=True)
     renderer = _DocxFallbackRenderer(document, asset_dir)
@@ -808,7 +810,7 @@ class _DocxFallbackRenderer:
             else:
                 self._render_table(block)
         self._draw_header_footer(self.pages[-1])
-        paths = []
+        paths: list[Path] = []
         for index, page in enumerate(self.pages, start=1):
             output_path = self.asset_dir / f"page-{index:03d}.png"
             page.save(output_path, format="PNG")
@@ -848,7 +850,7 @@ class _DocxFallbackRenderer:
             self._new_page()
 
     def _render_table(self, table: Table) -> None:
-        rows = []
+        rows: list[list[str]] = []
         for row in table.rows:
             rows.append([" ".join(cell.text.split()) for cell in row.cells])
         if not rows:
@@ -912,18 +914,22 @@ class _DocxFallbackRenderer:
         return max(12, int(style_size.pt)) if style_size else 24
 
     @staticmethod
-    def _font(size: int) -> ImageFont.ImageFont:
+    def _font(size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
         try:
             return ImageFont.truetype("DejaVuSans.ttf", size)
         except OSError:
             return ImageFont.load_default()
 
     @staticmethod
-    def _wrap_text(text: str, font: ImageFont.ImageFont, width: int) -> list[str]:
+    def _wrap_text(
+        text: str,
+        font: ImageFont.ImageFont | ImageFont.FreeTypeFont,
+        width: int,
+    ) -> list[str]:
         words = text.split()
         if not words:
             return []
-        lines = []
+        lines: list[str] = []
         current = words[0]
         for word in words[1:]:
             candidate = f"{current} {word}"
@@ -936,7 +942,11 @@ class _DocxFallbackRenderer:
         return lines
 
     @staticmethod
-    def _truncate_text(text: str, font: ImageFont.ImageFont, width: int) -> str:
+    def _truncate_text(
+        text: str,
+        font: ImageFont.ImageFont | ImageFont.FreeTypeFont,
+        width: int,
+    ) -> str:
         while text and font.getlength(text) > width:
             text = text[:-1]
         return text
@@ -973,9 +983,17 @@ def _build_attribute_payloads_for_page(
     if not tokens:
         return []
 
+    inference_service = LayoutLMv3InferenceService()
+    if inference_service.ocr_only:
+        return build_ocr_baseline_payloads(
+            page_id=page_id,
+            document_id=document_id,
+            tokens=tokens,
+            document_type=document_type,
+        )
+
     token_predictions: List[dict[str, Any]] = []
     try:
-        inference_service = LayoutLMv3InferenceService()
         inference_result = inference_service.infer_page(
             image_path=image_path,
             tokens=[item["token"] for item in tokens],
